@@ -1,5 +1,9 @@
 """Typed domain models used at system boundaries."""
 
+from equity_research_agent.models.business_analysis import (
+    BusinessAnalysis,
+    BusinessAnalysisEvidence,
+)
 from equity_research_agent.models.company import CompanyProfile, SecurityIdentity
 from equity_research_agent.models.financials import (
     AnnualFinancials,
@@ -15,6 +19,8 @@ from equity_research_agent.models.provenance import SourceReference
 __all__ = [
     "AnnualFinancials",
     "BalanceSheet",
+    "BusinessAnalysis",
+    "BusinessAnalysisEvidence",
     "CashFlowStatement",
     "CompanyProfile",
     "FiscalPeriod",
