@@ -9,6 +9,7 @@ from equity_research_agent.models.financials import (
     IncomeStatement,
     MarketSnapshot,
 )
+from equity_research_agent.models.metrics import FinancialMetrics, MetricUnavailability
 from equity_research_agent.models.provenance import SourceReference
 
 __all__ = [
@@ -17,8 +18,10 @@ __all__ = [
     "CashFlowStatement",
     "CompanyProfile",
     "FiscalPeriod",
+    "FinancialMetrics",
     "IncomeStatement",
     "MarketSnapshot",
+    "MetricUnavailability",
     "SecurityIdentity",
     "SourceReference",
 ]
