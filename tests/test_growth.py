@@ -10,6 +10,7 @@ from equity_research_agent.analytics.growth import (
     calculate_cagr,
     calculate_eps_cagr,
     calculate_revenue_cagr,
+    calculate_share_count_cagr,
 )
 from equity_research_agent.models.financials import (
     AnnualFinancials,
@@ -41,6 +42,7 @@ def make_financials(
     *,
     revenue: Decimal | None = Decimal("100"),
     reported_eps: Decimal | None = Decimal("10"),
+    shares_outstanding: int | None = None,
     currency: str = "EUR",
 ) -> AnnualFinancials:
     """Create compatible ASML-like annual statements for one fiscal year."""
@@ -64,6 +66,7 @@ def make_financials(
             period=period,
             reporting_currency=currency,
             sources=(source,),
+            shares_outstanding=shares_outstanding,
         ),
         cash_flow_statement=CashFlowStatement(
             period=period,
@@ -130,6 +133,49 @@ def test_eps_cagr_uses_reported_eps_endpoints() -> None:
     )
 
     assert calculate_eps_cagr(financials) == pytest.approx(Decimal("0.2"))
+
+
+def test_share_count_cagr_uses_balance_sheet_endpoints() -> None:
+    financials = (
+        make_financials(2023, shares_outstanding=100),
+        make_financials(2024, shares_outstanding=110),
+        make_financials(2025, shares_outstanding=121),
+    )
+
+    assert calculate_share_count_cagr(financials) == pytest.approx(Decimal("0.1"))
+
+
+def test_share_count_cagr_can_be_negative_for_share_buybacks() -> None:
+    financials = (
+        make_financials(2023, shares_outstanding=121),
+        make_financials(2024, shares_outstanding=110),
+        make_financials(2025, shares_outstanding=100),
+    )
+
+    expected = Decimal("-0.09090909090909090909090909091")
+
+    assert calculate_share_count_cagr(financials) == pytest.approx(expected)
+
+
+def test_share_count_cagr_rejects_missing_share_counts() -> None:
+    financials = (
+        make_financials(2024, shares_outstanding=None),
+        make_financials(2025, shares_outstanding=100),
+    )
+
+    with pytest.raises(ValueError, match="shares_outstanding"):
+        calculate_share_count_cagr(financials)
+
+
+def test_share_count_cagr_does_not_require_matching_reporting_currencies() -> None:
+    financials = (
+        make_financials(2024, shares_outstanding=100, currency="EUR"),
+        make_financials(2025, shares_outstanding=121, currency="USD"),
+    )
+
+    assert calculate_share_count_cagr(financials) == pytest.approx(Decimal("0.21"))
+    with pytest.raises(ValueError):
+        calculate_revenue_cagr(financials)
 
 
 @pytest.mark.parametrize(

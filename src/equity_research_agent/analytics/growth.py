@@ -47,10 +47,27 @@ def calculate_eps_cagr(financials: Sequence[AnnualFinancials]) -> Decimal:
     )
 
 
+def calculate_share_count_cagr(financials: Sequence[AnnualFinancials]) -> Decimal:
+    """Calculate share-count CAGR across annual financials.
+
+    Share counts are unitless, so financial-statement reporting currencies do
+    not affect their comparability.
+    """
+
+    return _calculate_statement_cagr(
+        financials,
+        lambda item: item.balance_sheet.shares_outstanding,
+        "shares_outstanding",
+        require_one_reporting_currency=False,
+    )
+
+
 def _calculate_statement_cagr(
     financials: Sequence[AnnualFinancials],
-    value_for: Callable[[AnnualFinancials], Decimal | None],
+    value_for: Callable[[AnnualFinancials], Decimal | int | None],
     metric_name: str,
+    *,
+    require_one_reporting_currency: bool = True,
 ) -> Decimal:
     """Validate an annual series and calculate its endpoint CAGR."""
 
@@ -61,11 +78,14 @@ def _calculate_statement_cagr(
     if len(set(period_end_dates)) != len(period_end_dates):
         raise ValueError("annual financial periods must have distinct end dates")
 
-    reporting_currencies = {
-        item.income_statement.reporting_currency for item in financials
-    }
-    if len(reporting_currencies) != 1:
-        raise ValueError("annual financial periods must use one reporting currency")
+    if require_one_reporting_currency:
+        reporting_currencies = {
+            item.income_statement.reporting_currency for item in financials
+        }
+        if len(reporting_currencies) != 1:
+            raise ValueError(
+                "annual financial periods must use one reporting currency"
+            )
 
     sorted_financials = sorted(financials, key=lambda item: item.period.end_date)
     values = [value_for(item) for item in sorted_financials]
@@ -84,4 +104,4 @@ def _calculate_statement_cagr(
     end_value = values[-1]
     assert start_value is not None
     assert end_value is not None
-    return calculate_cagr(start_value, end_value, years)
+    return calculate_cagr(Decimal(start_value), Decimal(end_value), years)
