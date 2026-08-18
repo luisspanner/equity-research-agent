@@ -1,8 +1,8 @@
 # V0 Walking Skeleton
 
-Current stage: **Synthesis foundations**. The Business and Bear Analysts are
-complete, and the final research synthesis now has a source-aware output schema
-and prompt preparation, but no LLM provider adapter yet.
+Current stage: **Synthesis complete**. The Business and Bear Analysts, plus the
+final research synthesis, can produce source-validated structured outputs
+through Groq's GPT-OSS 120B model.
 
 [x] Project setup
 [x] Domain models
@@ -11,6 +11,6 @@ and prompt preparation, but no LLM provider adapter yet.
 [x] Core financial metrics
 [x] Business Analyst
 [x] Bear Analyst
-[-] Synthesis — schema and prompt preparation
+[x] Synthesis
 [ ] Markdown report
 [ ] End-to-end CLI
