@@ -116,16 +116,32 @@ Abstractions and frameworks should only be introduced when they solve an actual 
 
 ## Current Status
 
-🚧 **V0 development starting**
+✅ **V0 walking skeleton complete**
 
-Initial focus:
+The CLI retrieves Alpha Vantage company and annual financial data, calculates
+deterministic metrics, runs the Business and Bear Analysts plus final Synthesis
+through Groq, and prints a sourced Markdown research report.
 
-1. Project setup
-2. Core domain models
-3. Financial data provider abstraction
-4. Deterministic financial metrics
-5. Minimal LLM analysis workflow
-6. End-to-end research report
+## Running V0
+
+Add the following keys to the local, git-ignored `.env` file:
+
+```dotenv
+ALPHA_VANTAGE_API_KEY=your_alpha_vantage_key
+GROQ_API_KEY=your_groq_key
+```
+
+Load them into your shell, then provide one ticker:
+
+```zsh
+set -a
+source .env
+set +a
+uv run equity-research-agent ASML
+```
+
+The Markdown report is printed to standard output. Redirect it from the shell if
+you want to save it to a file.
 
 ## Long-Term Ideas
 

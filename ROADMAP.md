@@ -1,8 +1,7 @@
 # V0 Walking Skeleton
 
-Current stage: **Markdown report complete**. The V0 analysis layers can now be
-rendered as a sourced Markdown research report; the remaining milestone is the
-end-to-end CLI.
+Current stage: **V0 walking skeleton complete**. The CLI runs the full sourced
+research flow from ticker input to a Markdown report.
 
 [x] Project setup
 [x] Domain models
@@ -13,4 +12,4 @@ end-to-end CLI.
 [x] Bear Analyst
 [x] Synthesis
 [x] Markdown report
-[ ] End-to-end CLI
+[x] End-to-end CLI
