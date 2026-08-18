@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 from collections.abc import Mapping
 from json import JSONDecodeError
 from urllib.error import HTTPError, URLError
@@ -18,11 +19,17 @@ class GroqBusinessAnalystError(RuntimeError):
     """Raised when a Groq Business Analyst response cannot be used safely."""
 
 
+_CREDENTIAL_VALUE = re.compile(
+    r"(?i)\b(api[_-]?key|apikey|token|authorization)\s*[:=]\s*[^\s,;]+"
+)
+
+
 class GroqBusinessAnalyst:
     """Run the Business Analyst with Groq's OpenAI GPT-OSS 120B model."""
 
     _API_URL = "https://api.groq.com/openai/v1/chat/completions"
     _DEFAULT_MODEL = "openai/gpt-oss-120b"
+    _USER_AGENT = "equity-research-agent/0.1"
 
     def __init__(
         self,
@@ -97,13 +104,16 @@ class GroqBusinessAnalyst:
             headers={
                 "Authorization": f"Bearer {self._api_key}",
                 "Content-Type": "application/json",
+                "User-Agent": self._USER_AGENT,
             },
             method="POST",
         )
         try:
             with urlopen(request, timeout=self._timeout_seconds) as response:
                 response_payload = json.loads(response.read().decode("utf-8"))
-        except (HTTPError, URLError, UnicodeDecodeError, JSONDecodeError):
+        except HTTPError as error:
+            raise GroqBusinessAnalystError(_safe_http_error_message(error)) from None
+        except (URLError, UnicodeDecodeError, JSONDecodeError):
             raise GroqBusinessAnalystError(
                 "could not retrieve a valid Groq response"
             ) from None
@@ -130,3 +140,25 @@ def _response_content(payload: Mapping[str, object]) -> str:
     if not isinstance(content, str):
         raise GroqBusinessAnalystError("Groq completion message has no text content")
     return content
+
+
+def _safe_http_error_message(error: HTTPError) -> str:
+    """Return a credential-safe Groq HTTP diagnostic when one is available."""
+
+    message = f"Groq HTTP {error.code}"
+    try:
+        payload = json.loads(error.read().decode("utf-8"))
+    except (UnicodeDecodeError, JSONDecodeError):
+        return message
+
+    if not isinstance(payload, Mapping):
+        return message
+    error_payload = payload.get("error")
+    if isinstance(error_payload, Mapping):
+        provider_message = error_payload.get("message")
+    else:
+        provider_message = error_payload
+    if not isinstance(provider_message, str):
+        return message
+    safe_message = _CREDENTIAL_VALUE.sub(r"\1=<redacted>", provider_message)
+    return f"{message}: {safe_message}"

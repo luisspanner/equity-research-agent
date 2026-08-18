@@ -136,6 +136,7 @@ def test_analyze_sends_json_mode_request_and_attaches_business_sources(
     request = recorded_requests[0]
     assert request.full_url == "https://api.groq.com/openai/v1/chat/completions"
     assert request.get_header("Authorization") == "Bearer test-key"
+    assert request.get_header("User-agent") == "equity-research-agent/0.1"
     assert request.data is not None
     request_body = json.loads(request.data.decode("utf-8"))
     assert request_body["model"] == "openai/gpt-oss-120b"

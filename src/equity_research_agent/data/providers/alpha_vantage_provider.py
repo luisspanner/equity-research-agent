@@ -4,6 +4,7 @@ import json
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from json import JSONDecodeError
+from time import monotonic, sleep
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import urlopen
@@ -28,6 +29,7 @@ class AlphaVantageProvider:
     """Retrieve V0 research data from Alpha Vantage and normalize it."""
 
     _BASE_URL = "https://www.alphavantage.co/query"
+    _MINIMUM_REQUEST_INTERVAL_SECONDS = 1.25
 
     def __init__(self, api_key: str, *, timeout_seconds: float = 10.0) -> None:
         """Create a provider with an explicit API key and request timeout."""
@@ -39,6 +41,7 @@ class AlphaVantageProvider:
 
         self._api_key = api_key
         self._timeout_seconds = timeout_seconds
+        self._last_request_started_at: float | None = None
 
     def get_company_profile(self, ticker: str) -> CompanyProfile:
         """Return a normalized company profile for ``ticker``."""
@@ -99,6 +102,7 @@ class AlphaVantageProvider:
         request_query = urlencode({**request_parameters, "apikey": self._api_key})
         source_query = urlencode(request_parameters)
 
+        self._wait_until_request_allowed()
         try:
             with urlopen(
                 f"{self._BASE_URL}?{request_query}", timeout=self._timeout_seconds
@@ -122,6 +126,18 @@ class AlphaVantageProvider:
             retrieved_at=datetime.now(timezone.utc),
         )
         return payload, source
+
+    def _wait_until_request_allowed(self) -> None:
+        """Conservatively respect Alpha Vantage's free-key request-rate limit."""
+
+        now = monotonic()
+        if self._last_request_started_at is not None:
+            elapsed = now - self._last_request_started_at
+            remaining_interval = self._MINIMUM_REQUEST_INTERVAL_SECONDS - elapsed
+            if remaining_interval > 0:
+                sleep(remaining_interval)
+                now = monotonic()
+        self._last_request_started_at = now
 
 
 def _normalize_ticker(ticker: str) -> str:

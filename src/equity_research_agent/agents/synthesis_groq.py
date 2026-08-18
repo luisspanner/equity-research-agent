@@ -28,6 +28,7 @@ class GroqResearchSynthesizer:
 
     _API_URL = "https://api.groq.com/openai/v1/chat/completions"
     _DEFAULT_MODEL = "openai/gpt-oss-120b"
+    _USER_AGENT = "equity-research-agent/0.1"
 
     def __init__(
         self,
@@ -115,6 +116,7 @@ class GroqResearchSynthesizer:
             headers={
                 "Authorization": f"Bearer {self._api_key}",
                 "Content-Type": "application/json",
+                "User-Agent": self._USER_AGENT,
             },
             method="POST",
         )

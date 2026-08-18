@@ -69,6 +69,10 @@ def recorded_urlopen(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         "equity_research_agent.data.providers.alpha_vantage_provider.urlopen",
         fake_urlopen,
     )
+    monkeypatch.setattr(
+        "equity_research_agent.data.providers.alpha_vantage_provider.sleep",
+        lambda delay: None,
+    )
     return request_urls
 
 
@@ -143,6 +147,35 @@ def test_get_market_snapshot_fetches_overview_and_daily_data(
     }
     for source in snapshot.sources:
         _assert_source_has_no_api_key(str(source.url))
+
+
+def test_provider_waits_for_the_remaining_request_interval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock_values = iter((0.0, 0.25, 1.25))
+    recorded_sleeps: list[float] = []
+
+    def fake_urlopen(url: str, *, timeout: float) -> FakeResponse:
+        return FakeResponse((FIXTURE_DIRECTORY / "overview.json").read_bytes())
+
+    monkeypatch.setattr(
+        "equity_research_agent.data.providers.alpha_vantage_provider.urlopen",
+        fake_urlopen,
+    )
+    monkeypatch.setattr(
+        "equity_research_agent.data.providers.alpha_vantage_provider.monotonic",
+        lambda: next(clock_values),
+    )
+    monkeypatch.setattr(
+        "equity_research_agent.data.providers.alpha_vantage_provider.sleep",
+        recorded_sleeps.append,
+    )
+
+    provider = AlphaVantageProvider("test-key")
+    provider.get_company_profile("ASML")
+    provider.get_company_profile("ASML")
+
+    assert recorded_sleeps == [1.0]
 
 
 @pytest.mark.parametrize("api_key", ["", "   "])

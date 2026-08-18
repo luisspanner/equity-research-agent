@@ -198,6 +198,24 @@ def test_normalizer_rejects_alpha_vantage_error_bodies(error_key: str) -> None:
         )
 
 
+def test_normalizer_preserves_alpha_vantage_provider_message() -> None:
+    with pytest.raises(AlphaVantageNormalizationError, match="rate limit exceeded"):
+        normalize_company_profile(
+            {"Information": "rate limit exceeded"}, make_source("overview")
+        )
+
+
+def test_normalizer_redacts_credential_like_values_from_provider_message() -> None:
+    with pytest.raises(AlphaVantageNormalizationError) as error:
+        normalize_company_profile(
+            {"Information": "Request failed for apikey=secret-value"},
+            make_source("overview"),
+        )
+
+    assert "secret-value" not in str(error.value)
+    assert "apikey=<redacted>" in str(error.value)
+
+
 def test_annual_normalization_rejects_malformed_numerical_data() -> None:
     income_payload = load_fixture("income_statement.json")
     reports = income_payload["annualReports"]

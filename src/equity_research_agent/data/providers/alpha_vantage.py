@@ -1,5 +1,6 @@
 """Pure normalization of the Alpha Vantage V0 payload contract."""
 
+import re
 from collections.abc import Mapping
 from datetime import date
 from decimal import Decimal, InvalidOperation
@@ -21,6 +22,9 @@ class AlphaVantageNormalizationError(ValueError):
 
 
 _PROVIDER_ERROR_KEYS = frozenset({"Information", "Note", "Error", "Error Message"})
+_CREDENTIAL_QUERY_PARAMETER = re.compile(
+    r"(?i)\b(apikey|api_key|token)=([^&\s]+)"
+)
 _OVERVIEW_ALLOWLIST = frozenset(
     {
         "Symbol",
@@ -228,8 +232,21 @@ def normalize_market_snapshot(
 
 def _reject_provider_error(payload: Mapping[str, object]) -> None:
     if error_keys := _PROVIDER_ERROR_KEYS.intersection(payload):
-        keys = ", ".join(sorted(error_keys))
-        raise AlphaVantageNormalizationError(f"Alpha Vantage response contains: {keys}")
+        details = "; ".join(
+            f"{key}: {_safe_provider_message(payload[key])}"
+            for key in sorted(error_keys)
+        )
+        raise AlphaVantageNormalizationError(
+            f"Alpha Vantage response contains: {details}"
+        )
+
+
+def _safe_provider_message(value: object) -> str:
+    """Retain provider diagnostics without exposing credential-like query values."""
+
+    if not isinstance(value, str):
+        return "non-text provider message"
+    return _CREDENTIAL_QUERY_PARAMETER.sub(r"\1=<redacted>", value)
 
 
 def _records_by_period(

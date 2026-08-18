@@ -3,6 +3,7 @@
 import json
 from datetime import date
 from email.message import Message
+from io import BytesIO
 from urllib.error import HTTPError, URLError
 from urllib.request import Request
 
@@ -110,6 +111,7 @@ def test_analyze_sends_json_mode_request_and_attaches_profile_sources(
     request = recorded_requests[0]
     assert request.full_url == "https://api.groq.com/openai/v1/chat/completions"
     assert request.get_header("Authorization") == "Bearer test-key"
+    assert request.get_header("User-agent") == "equity-research-agent/0.1"
     assert request.data is not None
     request_body = json.loads(request.data.decode("utf-8"))
     assert request_body["model"] == "openai/gpt-oss-120b"
@@ -168,6 +170,36 @@ def test_network_errors_are_safely_wrapped(
         GroqBusinessAnalyst("test-key").analyze(make_profile())
 
     assert "test-key" not in str(error.value)
+
+
+def test_http_error_preserves_a_credential_safe_provider_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    http_error = HTTPError(
+        "https://example.test",
+        400,
+        "bad request",
+        Message(),
+        BytesIO(
+            b'{"error": {"message": "Unsupported response format; '
+            b'api_key=secret-value"}}'
+        ),
+    )
+
+    def failing_urlopen(request: Request, *, timeout: float) -> FakeResponse:
+        raise http_error
+
+    monkeypatch.setattr(
+        "equity_research_agent.agents.business_groq.urlopen", failing_urlopen
+    )
+
+    with pytest.raises(GroqBusinessAnalystError) as error:
+        GroqBusinessAnalyst("test-key").analyze(make_profile())
+
+    assert "Groq HTTP 400" in str(error.value)
+    assert "Unsupported response format" in str(error.value)
+    assert "secret-value" not in str(error.value)
+    assert "api_key=<redacted>" in str(error.value)
 
 
 @pytest.mark.parametrize(
