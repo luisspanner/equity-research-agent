@@ -1,16 +1,15 @@
 # V0 Walking Skeleton
 
-Current stage: **Business Analyst foundations**. The deterministic data and
-metrics layers are complete; the Business Analyst currently has a source-aware
-output schema and prompt preparation, but no LLM provider adapter yet.
+Current stage: **Bear Analyst complete**. The Business and Bear Analysts can
+produce source-validated structured outputs through Groq's GPT-OSS 120B model.
 
 [x] Project setup
 [x] Domain models
 [x] FinancialDataProvider interface
 [x] First financial data provider
 [x] Core financial metrics
-[-] Business Analyst — schema and prompt preparation
-[ ] Bear Analyst
+[x] Business Analyst
+[x] Bear Analyst
 [ ] Synthesis
 [ ] Markdown report
 [ ] End-to-end CLI
