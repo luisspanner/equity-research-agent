@@ -16,6 +16,7 @@ from equity_research_agent.models.financials import (
 )
 from equity_research_agent.models.metrics import FinancialMetrics, MetricUnavailability
 from equity_research_agent.models.provenance import SourceReference
+from equity_research_agent.models.synthesis import ResearchSynthesis, SynthesisEvidence
 
 __all__ = [
     "AnnualFinancials",
@@ -31,6 +32,8 @@ __all__ = [
     "IncomeStatement",
     "MarketSnapshot",
     "MetricUnavailability",
+    "ResearchSynthesis",
     "SecurityIdentity",
     "SourceReference",
+    "SynthesisEvidence",
 ]
