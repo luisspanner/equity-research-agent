@@ -13,6 +13,7 @@ def test_run_research_orchestrates_the_v0_components(
     financials = object()
     market_snapshot = object()
     metrics = object()
+    financial_risk_context = object()
     business_analysis = object()
     bear_analysis = object()
     synthesis = object()
@@ -37,9 +38,19 @@ def test_run_research_orchestrates_the_v0_components(
 
     class FakeBearAnalyst:
         def analyze(
-            self, received_profile: object, received_business_analysis: object
+            self,
+            received_profile: object,
+            received_business_analysis: object,
+            received_financial_risk_context: object,
         ) -> object:
-            events.append(("bear", received_profile, received_business_analysis))
+            events.append(
+                (
+                    "bear",
+                    received_profile,
+                    received_business_analysis,
+                    received_financial_risk_context,
+                )
+            )
             return bear_analysis
 
     class FakeSynthesizer:
@@ -72,6 +83,25 @@ def test_run_research_orchestrates_the_v0_components(
     monkeypatch.setattr(
         "equity_research_agent.assemble_financial_metrics", fake_assemble
     )
+
+    def fake_build_context(
+        received_metrics: object,
+        received_financials: object,
+        received_market_snapshot: object,
+    ) -> object:
+        events.append(
+            (
+                "financial-risk",
+                received_metrics,
+                received_financials,
+                received_market_snapshot,
+            )
+        )
+        return financial_risk_context
+
+    monkeypatch.setattr(
+        "equity_research_agent.build_financial_risk_context", fake_build_context
+    )
     monkeypatch.setattr("equity_research_agent.render_research_report", fake_render)
 
     report = run_research(
@@ -88,8 +118,9 @@ def test_run_research_orchestrates_the_v0_components(
         ("financials", "ASML"),
         ("market", "ASML"),
         ("metrics", financials, market_snapshot),
+        ("financial-risk", metrics, financials, market_snapshot),
         ("business", profile),
-        ("bear", profile, business_analysis),
+        ("bear", profile, business_analysis, financial_risk_context),
         ("synthesis", profile, business_analysis, bear_analysis),
         ("report", profile, metrics, business_analysis, bear_analysis, synthesis),
     ]

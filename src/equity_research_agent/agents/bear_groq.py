@@ -13,6 +13,8 @@ from equity_research_agent.agents.bear import build_bear_analysis_prompt
 from equity_research_agent.models.bear_analysis import BearAnalysis
 from equity_research_agent.models.business_analysis import BusinessAnalysis
 from equity_research_agent.models.company import CompanyProfile
+from equity_research_agent.models.financial_risk import FinancialRiskContext
+from equity_research_agent.models.provenance import SourceReference
 
 
 class GroqBearAnalystError(RuntimeError):
@@ -56,7 +58,10 @@ class GroqBearAnalyst:
         return cls(api_key)
 
     def analyze(
-        self, profile: CompanyProfile, business_analysis: BusinessAnalysis
+        self,
+        profile: CompanyProfile,
+        business_analysis: BusinessAnalysis,
+        financial_risk_context: FinancialRiskContext,
     ) -> BearAnalysis:
         """Return source-validated bear analysis for one company profile."""
 
@@ -65,7 +70,9 @@ class GroqBearAnalyst:
             "messages": [
                 {
                     "role": "user",
-                    "content": build_bear_analysis_prompt(profile, business_analysis),
+                    "content": build_bear_analysis_prompt(
+                        profile, business_analysis, financial_risk_context
+                    ),
                 }
             ],
             "response_format": {"type": "json_object"},
@@ -86,7 +93,10 @@ class GroqBearAnalyst:
             )
 
         analysis_payload["sources"] = [
-            source.model_dump(mode="json") for source in business_analysis.sources
+            source.model_dump(mode="json")
+            for source in _merge_sources(
+                business_analysis.sources, financial_risk_context.sources
+            )
         ]
         try:
             return BearAnalysis.model_validate_json(json.dumps(analysis_payload))
@@ -138,3 +148,20 @@ def _response_content(payload: Mapping[str, object]) -> str:
     if not isinstance(content, str):
         raise GroqBearAnalystError("Groq completion message has no text content")
     return content
+
+
+def _merge_sources(
+    business_sources: tuple[SourceReference, ...],
+    financial_risk_sources: tuple[SourceReference, ...],
+) -> tuple[SourceReference, ...]:
+    """Combine sources while rejecting conflicting references with one source ID."""
+
+    sources_by_id: dict[str, SourceReference] = {}
+    for source in (*business_sources, *financial_risk_sources):
+        existing_source = sources_by_id.get(source.source_id)
+        if existing_source is not None and existing_source != source:
+            raise ValueError(
+                f"source ID {source.source_id} refers to conflicting source references"
+            )
+        sources_by_id[source.source_id] = source
+    return tuple(sources_by_id.values())

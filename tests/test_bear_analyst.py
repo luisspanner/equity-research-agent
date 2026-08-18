@@ -1,6 +1,8 @@
 """Tests for source-bounded Bear Analyst preparation and output models."""
 
+import json
 from datetime import date
+from decimal import Decimal
 
 import pytest
 from pydantic import HttpUrl
@@ -12,6 +14,10 @@ from equity_research_agent.models.business_analysis import (
     BusinessAnalysisEvidence,
 )
 from equity_research_agent.models.company import CompanyProfile, SecurityIdentity
+from equity_research_agent.models.financial_risk import (
+    FinancialRiskContext,
+    FinancialRiskMetric,
+)
 from equity_research_agent.models.provenance import SourceReference
 
 
@@ -63,8 +69,33 @@ def make_business_analysis() -> BusinessAnalysis:
     )
 
 
+def make_financial_risk_context() -> FinancialRiskContext:
+    """Create sourced deterministic financial context for Bear Analyst tests."""
+
+    financial_source = SourceReference(
+        provider="test_provider",
+        source_type="income_statement",
+        source_id="TEST-income-2025",
+        url=HttpUrl("https://example.com/income-statement"),
+        captured_on=date(2026, 8, 18),
+    )
+    return FinancialRiskContext(
+        metrics=(
+            FinancialRiskMetric(
+                metric="operating_margin",
+                value=Decimal("0.25"),
+                unit="percentage",
+                source_ids=(financial_source.source_id,),
+            ),
+        ),
+        sources=(financial_source,),
+    )
+
+
 def test_prompt_preserves_the_evidence_boundary_for_prior_analysis() -> None:
-    prompt = build_bear_analysis_prompt(make_profile(), make_business_analysis())
+    prompt = build_bear_analysis_prompt(
+        make_profile(), make_business_analysis(), make_financial_risk_context()
+    )
 
     assert "Test Company" in prompt
     assert "Subscription software provider." in prompt
@@ -72,6 +103,29 @@ def test_prompt_preserves_the_evidence_boundary_for_prior_analysis() -> None:
     assert "not as new evidence" in prompt
     assert "Do not invent facts" in prompt
     assert "financial\ncalculations" in prompt
+    assert "cite the source IDs listed for that metric" in prompt
+
+
+def test_prompt_includes_financial_metrics_and_merged_source_ids() -> None:
+    prompt = build_bear_analysis_prompt(
+        make_profile(), make_business_analysis(), make_financial_risk_context()
+    )
+    context = json.loads(prompt.split("Research context:\n", maxsplit=1)[1])
+
+    assert context["financial_risk_context"] == {
+        "metrics": [
+            {
+                "metric": "operating_margin",
+                "source_ids": ["TEST-income-2025"],
+                "unit": "percentage",
+                "value": "0.25",
+            }
+        ]
+    }
+    assert [source["source_id"] for source in context["sources"]] == [
+        "TEST-overview",
+        "TEST-income-2025",
+    ]
 
 
 def test_bear_analysis_accepts_risks_that_reference_supplied_sources() -> None:

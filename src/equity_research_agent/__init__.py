@@ -10,6 +10,7 @@ from equity_research_agent.agents import (
     GroqBusinessAnalyst,
     GroqResearchSynthesizer,
 )
+from equity_research_agent.analytics.financial_risk import build_financial_risk_context
 from equity_research_agent.analytics.metrics import assemble_financial_metrics
 from equity_research_agent.data.providers import (
     AlphaVantageProvider,
@@ -18,6 +19,7 @@ from equity_research_agent.data.providers import (
 from equity_research_agent.models.bear_analysis import BearAnalysis
 from equity_research_agent.models.business_analysis import BusinessAnalysis
 from equity_research_agent.models.company import CompanyProfile
+from equity_research_agent.models.financial_risk import FinancialRiskContext
 from equity_research_agent.models.synthesis import ResearchSynthesis
 from equity_research_agent.reports import render_research_report
 
@@ -33,7 +35,10 @@ class BearAnalyst(Protocol):
     """Produce a structured downside analysis from business context."""
 
     def analyze(
-        self, profile: CompanyProfile, business_analysis: BusinessAnalysis
+        self,
+        profile: CompanyProfile,
+        business_analysis: BusinessAnalysis,
+        financial_risk_context: FinancialRiskContext,
     ) -> BearAnalysis:
         """Analyze the company's plausible downside risks."""
 
@@ -63,8 +68,13 @@ def run_research(
     financials = provider.get_annual_financials(ticker)
     market_snapshot = provider.get_market_snapshot(ticker)
     metrics = assemble_financial_metrics(financials, market_snapshot)
+    financial_risk_context = build_financial_risk_context(
+        metrics, financials, market_snapshot
+    )
     business_analysis = business_analyst.analyze(profile)
-    bear_analysis = bear_analyst.analyze(profile, business_analysis)
+    bear_analysis = bear_analyst.analyze(
+        profile, business_analysis, financial_risk_context
+    )
     synthesis = synthesizer.analyze(profile, business_analysis, bear_analysis)
     return render_research_report(
         profile, metrics, business_analysis, bear_analysis, synthesis

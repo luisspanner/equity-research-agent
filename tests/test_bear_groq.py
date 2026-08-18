@@ -2,6 +2,7 @@
 
 import json
 from datetime import date
+from decimal import Decimal
 from email.message import Message
 from urllib.error import HTTPError, URLError
 from urllib.request import Request
@@ -18,6 +19,10 @@ from equity_research_agent.models.business_analysis import (
     BusinessAnalysisEvidence,
 )
 from equity_research_agent.models.company import CompanyProfile, SecurityIdentity
+from equity_research_agent.models.financial_risk import (
+    FinancialRiskContext,
+    FinancialRiskMetric,
+)
 from equity_research_agent.models.provenance import SourceReference
 
 
@@ -89,13 +94,36 @@ def make_business_analysis() -> BusinessAnalysis:
     )
 
 
+def make_financial_risk_context() -> FinancialRiskContext:
+    """Create source-aware financial context for a Groq request."""
+
+    financial_source = SourceReference(
+        provider="test_provider",
+        source_type="income_statement",
+        source_id="TEST-income-2025",
+        url=HttpUrl("https://example.com/income-statement"),
+        captured_on=date(2026, 8, 18),
+    )
+    return FinancialRiskContext(
+        metrics=(
+            FinancialRiskMetric(
+                metric="operating_margin",
+                value=Decimal("0.25"),
+                unit="percentage",
+                source_ids=(financial_source.source_id,),
+            ),
+        ),
+        sources=(financial_source,),
+    )
+
+
 def make_completion(content: object) -> bytes:
     """Create a minimal successful Groq chat-completions payload."""
 
     return json.dumps({"choices": [{"message": {"content": content}}]}).encode()
 
 
-def valid_analysis_content() -> str:
+def valid_analysis_content(source_id: str = "TEST-overview") -> str:
     """Create an LLM JSON object that matches the BearAnalysis schema."""
 
     return json.dumps(
@@ -104,7 +132,7 @@ def valid_analysis_content() -> str:
                 {
                     "risk": "Customer concentration could increase volatility.",
                     "downside_mechanism": "Limited customer detail raises uncertainty.",
-                    "source_ids": ["TEST-overview"],
+                    "source_ids": [source_id],
                 }
             ],
             "thesis_killers": ["Evidence of sustained customer losses."],
@@ -128,7 +156,7 @@ def test_analyze_sends_json_mode_request_and_attaches_business_sources(
     )
 
     analysis = GroqBearAnalyst("test-key").analyze(
-        make_profile(), make_business_analysis()
+        make_profile(), make_business_analysis(), make_financial_risk_context()
     )
 
     assert analysis.sources[0].source_id == "TEST-overview"
@@ -141,6 +169,58 @@ def test_analyze_sends_json_mode_request_and_attaches_business_sources(
     request_body = json.loads(request.data.decode("utf-8"))
     assert request_body["model"] == "openai/gpt-oss-120b"
     assert request_body["response_format"] == {"type": "json_object"}
+
+
+def test_analyze_attaches_financial_sources_referenced_by_the_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_urlopen(request: Request, *, timeout: float) -> FakeResponse:
+        return FakeResponse(make_completion(valid_analysis_content("TEST-income-2025")))
+
+    monkeypatch.setattr(
+        "equity_research_agent.agents.bear_groq.urlopen", fake_urlopen
+    )
+
+    analysis = GroqBearAnalyst("test-key").analyze(
+        make_profile(), make_business_analysis(), make_financial_risk_context()
+    )
+
+    assert analysis.risks[0].source_ids == ("TEST-income-2025",)
+    assert [source.source_id for source in analysis.sources] == [
+        "TEST-overview",
+        "TEST-income-2025",
+    ]
+
+
+def test_analyze_rejects_conflicting_sources_before_http_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conflicting_source = make_source().model_copy(
+        update={"url": HttpUrl("https://example.com/conflicting-overview")}
+    )
+    financial_risk_context = FinancialRiskContext(
+        metrics=(
+            FinancialRiskMetric(
+                metric="operating_margin",
+                value=Decimal("0.25"),
+                unit="percentage",
+                source_ids=(conflicting_source.source_id,),
+            ),
+        ),
+        sources=(conflicting_source,),
+    )
+
+    def unexpected_urlopen(request: Request, *, timeout: float) -> FakeResponse:
+        raise AssertionError("HTTP request must not be sent")
+
+    monkeypatch.setattr(
+        "equity_research_agent.agents.bear_groq.urlopen", unexpected_urlopen
+    )
+
+    with pytest.raises(ValueError, match="conflicting source references"):
+        GroqBearAnalyst("test-key").analyze(
+            make_profile(), make_business_analysis(), financial_risk_context
+        )
 
 
 @pytest.mark.parametrize("api_key", ["", "   "])
@@ -187,7 +267,7 @@ def test_network_errors_are_safely_wrapped(
 
     with pytest.raises(GroqBearAnalystError) as error:
         GroqBearAnalyst("test-key").analyze(
-            make_profile(), make_business_analysis()
+            make_profile(), make_business_analysis(), make_financial_risk_context()
         )
 
     assert "test-key" not in str(error.value)
@@ -214,7 +294,7 @@ def test_invalid_groq_responses_are_rejected(
 
     with pytest.raises(GroqBearAnalystError, match=message):
         GroqBearAnalyst("test-key").analyze(
-            make_profile(), make_business_analysis()
+            make_profile(), make_business_analysis(), make_financial_risk_context()
         )
 
 
@@ -241,5 +321,5 @@ def test_schema_invalid_response_is_rejected(monkeypatch: pytest.MonkeyPatch) ->
 
     with pytest.raises(GroqBearAnalystError, match="BearAnalysis schema"):
         GroqBearAnalyst("test-key").analyze(
-            make_profile(), make_business_analysis()
+            make_profile(), make_business_analysis(), make_financial_risk_context()
         )
