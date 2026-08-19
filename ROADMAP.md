@@ -31,11 +31,12 @@ Completed after V0:
 - [x] EDGAR annual-report discovery, metadata only
 - [x] EDGAR filing-document retrieval as sourced, untrusted text, held in
   memory only
+- [x] Filing-text extraction, validated against the real ASML Form 20-F
 
-Neither filing capability is used by the research workflow yet. No
-implementation slice is currently active. The next step is to select and review
-one bounded filing-text-extraction slice. The roadmap does not select or begin
-that work automatically.
+No filing capability is used by the research workflow yet. No implementation
+slice is currently active. The next step is to select and review one bounded
+filing-sectioning slice. The roadmap does not select or begin that work
+automatically.
 
 Live CLI runs are reserved for bug investigation or after several new features
 have accumulated. Unit, integration, lint, and type checks are the default
@@ -119,13 +120,20 @@ in memory. It established the guards appropriate to the project's first hostile
 input — URL, size, content type, and decoding — while leaving parsing,
 caching, and persistence out.
 
-### Next selection: filing-text extraction
+### Completed: filing-text extraction
 
-Convert one retrieved HTML document into plain text that later slices can
-section and chunk. Extraction is a deterministic transformation and should be
-testable as one: given recorded filing HTML, produce known text. Keep it
-separate from section detection, chunking, and search, and do not put filing
-text in front of a model in the same slice.
+The third slice converted retrieved HTML into plain text and was then corrected
+against the real ASML Form 20-F. Validating against a live filing changed the
+implementation in ways no synthetic fixture had suggested, and the measured
+findings are recorded in `HANDOFF.md`.
+
+### Next selection: filing sectioning
+
+Divide one extracted document into labelled sections that chunking and
+retrieval can target. The design question comes first: the filing examined so
+far contains no SEC `Item` headings at all, so a section boundary has to be
+defined from what the document actually contains. Keep chunking, embeddings,
+and analyst integration out of this slice.
 
 Introduce dedicated Market, Moat, Growth, or Risk Analysts only when each has
 a distinct evidence boundary, responsibility, and evaluation criterion—not

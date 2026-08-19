@@ -15,9 +15,10 @@ Financial Quality Analyst is fully integrated into workflow orchestration,
 Synthesis, and reporting, and its findings are validated against the exact
 deterministic metrics and source IDs they cite.
 
-Separately from that pipeline, the project can now discover an issuer's most
-recent annual report on SEC EDGAR and retrieve its primary document as
-untrusted text. Neither capability is wired into the research workflow.
+Separately from that pipeline, the project can discover an issuer's most recent
+annual report on SEC EDGAR, retrieve its primary document as untrusted text, and
+extract that document into readable plain text. None of these capabilities is
+wired into the research workflow.
 
 ## Completed Filing-Ingestion Slices
 
@@ -53,19 +54,64 @@ Commit `9fd9589` — filing-document retrieval, in memory only.
   segments when the URL is built, so the archive-prefix check also catches
   escapes that bypass the normalizer. Both layers are pinned by tests.
 
+Commits `8eb93a3` and `f1acadf` — filing-text extraction, then its correction
+against the real filing.
+
+- `FilingText` carries extracted text with the filing and sources it came from.
+  Extraction performs no retrieval, so it adds no source, and the field keeps
+  the name `untrusted_text`: a more readable representation is not a more
+  trustworthy one.
+- A separate `filings` package holds post-retrieval processing, distinct from
+  `data/providers`, which acquires data rather than transforming it.
+- Extraction drops document metadata, scripts, styles, inline-XBRL headers, and
+  hidden elements; treats block elements and line breaks as line boundaries;
+  gives table cells an explicit space; and collapses whitespace including
+  non-breaking spaces.
+- Text nodes are joined with no separator, matching browser rendering. See the
+  measured findings below for why the earlier space separator was removed.
+- `beautifulsoup4` is the only dependency added, used with the standard-library
+  parser backend.
+
+## Measured Filing-Structure Findings
+
+Carry these forward. They were measured against ASML's 2025 Form 20-F
+(accession `0001628280-26-011378`, retrieved 2026-08-20), not assumed, and they
+constrain the design of later slices.
+
+- **The document has no `Item` headings.** `Item 3.D` and `Item 4.B` match zero
+  times. This filer uses its own narrative structure with a cross-reference
+  table. Sectioning cannot be built on SEC item-heading regexes and expect to
+  work on the company the project tests with.
+- **Line breaks do not mark sentences.** Each visual line is wrapped in its own
+  absolutely-positioned `div`, so one sentence routinely spans five extracted
+  lines. Chunking must not treat a line as a paragraph or a sentence.
+- **A sentence's numbers live in sibling blocks, not in an ancestor.** Anything
+  that walks up the DOM to find a passage's context will swallow the whole
+  document.
+- **Filer spacing is reliable; added spacing is not.** Joining text nodes with a
+  space produced 1,115 spurious spaces before punctuation and split hundreds of
+  words, while reducing fused tokens only from 47 to 46.
+- **Columns can still fuse.** Cover-page columns laid out by absolute
+  positioning carry no whitespace between inline elements, so they concatenate.
+  `tests/test_filing_text_extraction.py` asserts this rather than hiding it.
+- **Scale.** 24 MB of source HTML yields about 1.33 MB of text across roughly
+  38,000 lines. There were no zero-width spaces or byte-order marks;
+  normalizing `\xa0` was sufficient.
+
 ## Current / Next Slice
 
 No implementation slice is currently active.
 
-The next step is filing-text extraction: convert one `RetrievedFiling`'s HTML
-into plain text suitable for later sectioning, without interpreting it.
-Sectioning, chunking, search, embeddings, and analyst integration each remain
-separate later slices.
+The next step is filing sectioning: divide one `FilingText` into labelled
+sections that later chunking and retrieval can target. Because item headings do
+not exist in this filer's document, the first design question is what a section
+boundary actually is here — a heading style, a cross-reference table, a table of
+contents, or explicit user-supplied anchors. Decide that before implementing.
 
 ### Explicitly Out of Scope
 
-- section detection, chunking, summarizing, or interpreting filing text;
-- filing search, embeddings, RAG, pgvector, PostgreSQL, FastAPI, or Docker;
+- chunking, embeddings, retrieval, RAG, pgvector, PostgreSQL, FastAPI, Docker;
+- summarizing or interpreting filing text;
 - exposing filing text to any analyst prompt;
 - caching or persisting retrieved documents;
 - ticker-to-CIK resolution, a second filing source, or provider fallback;
@@ -77,16 +123,21 @@ separate later slices.
 - `AGENTS.md` — development and collaboration contract
 - `README.md` — product purpose and high-level architecture
 - `ROADMAP.md` — sequencing and Phase 2 direction
-- `src/equity_research_agent/models/filings.py` — discovered- and
-  retrieved-filing contracts
+- `src/equity_research_agent/models/filings.py` — discovered-, retrieved-, and
+  extracted-filing contracts
 - `src/equity_research_agent/data/providers/base.py` — provider protocols
 - `src/equity_research_agent/data/providers/edgar.py` — submissions normalizer
 - `src/equity_research_agent/data/providers/edgar_provider.py` — EDGAR transport
   and document retrieval
+- `src/equity_research_agent/filings/text.py` — HTML-to-text extraction
 - `src/equity_research_agent/models/provenance.py` — source-reference model and
   merge behavior
 - `src/equity_research_agent/__init__.py` — current workflow composition
 - `tests/` — executable behavior and established testing conventions
+- `tests/fixtures/providers/sec_edgar/asml/asml_20f_excerpt.htm` — trimmed
+  excerpt of the real filing; the header comment records its provenance
+- `tests/fixtures/providers/sec_edgar/asml/inline_xbrl_excerpt.htm` — synthetic
+  fixture that isolates individual extraction rules
 
 ## Important Architectural Decisions
 
@@ -107,6 +158,12 @@ separate later slices.
   prompt outside an explicit evidence boundary.
 - Provider adapters separate pure normalization from transport. Normalizers are
   I/O-free and independently testable against recorded payloads.
+- Filing processing lives in `filings/`, separate from `data/providers/`, which
+  acquires data rather than transforming it.
+- Extraction changes representation, never meaning. It adds no source and keeps
+  the untrusted naming, so provenance and evidence boundaries survive it.
+- Synthetic fixtures isolate single rules; recorded excerpts of real filings
+  keep those rules honest. Both are kept deliberately.
 - CIK zero-padding is an EDGAR request detail handled at the adapter boundary;
   the domain keeps the unpadded CIK already carried by `SecurityIdentity`.
 - Add a dedicated analyst only when its responsibility, evidence boundary, or
@@ -117,18 +174,23 @@ separate later slices.
 
 ## Verification Status
 
-Freshly verified locally on 2026-08-20 against commit `9fd9589`:
+Freshly verified locally on 2026-08-20 against commit `f1acadf`:
 
-- `uv run pytest`: 421 passed
+- `uv run pytest`: 453 passed
 - `uv run ruff check`: passed
 - `uv run mypy`: passed for configured `src`
 - `git diff --check`: passed
 
-No live provider or model calls were made; EDGAR behavior is verified against
-recorded submissions and document fixtures. A fresh agent should rerun checks
-relevant to any
-new change. Live CLI runs are deliberately reserved for bug investigation or for
-validating several accumulated features because provider test runs are limited.
+Automated checks make no live provider or model calls; EDGAR behavior is
+verified against recorded submissions and document fixtures. A fresh agent
+should rerun checks relevant to any new change.
+
+Live runs differ in cost and should be treated differently. EDGAR needs no API
+key and has no daily quota, so a live filing fetch costs two requests and is
+worth doing whenever document handling changes; be polite with the declared
+contact user agent and record what is learned as a fixture. Alpha Vantage has a
+metered daily quota and Groq costs tokens, so full CLI runs stay reserved for
+bug investigation or for validating several accumulated features.
 
 ## Known Limitations
 
@@ -144,8 +206,13 @@ validating several accumulated features because provider test runs are limited.
   second provider still requires explicit adapters.
 - Retrieved documents are held in memory only. Nothing is cached or persisted,
   so a second run refetches the same immutable filing.
-- Filing documents are fetched and decoded but never parsed or searched, and no
-  RAG capability exists.
+- Filing documents are extracted to plain text but never sectioned or searched,
+  and no RAG capability exists.
+- Extraction concatenates adjacent inline elements that carry no source
+  whitespace, so absolutely-positioned columns can fuse. Accepted deliberately;
+  the alternative introduced far more damage elsewhere.
+- Extraction is validated against one filer's markup. Another filer's HTML may
+  need different handling, and the cheap way to find out is one live fetch.
 - Document retrieval rejects an undeclared or non-text `Content-Type` and any
   text it cannot decode with the declared character set. Redirects are followed
   without re-checking the final URL against the archive-prefix guard.
@@ -165,14 +232,17 @@ validating several accumulated features because provider test runs are limited.
   when chunks and embeddings exist to query, not to raw document storage.
 - Where does ticker-to-CIK resolution belong once the workflow needs filings:
   the financial-data provider, a dedicated resolver, or the caller?
-- Does text extraction need its own dependency, and if so which one? EDGAR
-  documents are inline XBRL HTML; the standard library's `html.parser` may be
-  sufficient for a first extraction slice.
+- What marks a section boundary in a filing that has no `Item` headings? Options
+  include heading styles, the filer's cross-reference table, the table of
+  contents, or explicit caller-supplied anchors. This decides the next slice.
+- Should sectioning be filer-specific? One document has been examined. A second
+  filer, ideally a 10-K rather than a 20-F, would show which behavior is general
+  and which is Workiva-specific.
 
 ## Next Expected Steps
 
-1. Select and review one bounded filing-text-extraction slice.
-2. Inspect only the filing models, EDGAR adapter, and tests relevant to it.
+1. Select and review one bounded filing-sectioning slice.
+2. Inspect only the filing models, extraction, and tests relevant to it.
 3. Propose the implementation approach and affected files under `AGENTS.md`.
 4. Wait for approval if the request is planning or review-first, then implement
    and verify only the selected slice.

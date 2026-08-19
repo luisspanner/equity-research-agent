@@ -124,6 +124,11 @@ plus final Synthesis through Groq, and prints a sourced Markdown research
 report. Financial-risk and Financial Quality findings retain source provenance
 through the workflow.
 
+Filing ingestion has begun separately: the project can discover an issuer's most
+recent SEC EDGAR annual report, retrieve its primary document as explicitly
+untrusted text, and extract that document into readable plain text. None of it
+is wired into the research workflow yet. See `HANDOFF.md` for current state.
+
 ## Running V0
 
 Add the following keys to the local, git-ignored `.env` file:
