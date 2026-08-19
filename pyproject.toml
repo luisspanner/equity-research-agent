@@ -1,7 +1,7 @@
 [project]
 name = "equity-research-agent"
 version = "0.1.0"
-description = "Add your description here"
+description = "Equity research workflow combining deterministic financial analysis with sourced LLM reasoning"
 readme = "README.md"
 authors = [
     { name = "luisspanner", email = "spanner.luis@outlook.de" }

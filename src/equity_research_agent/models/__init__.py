@@ -6,6 +6,10 @@ from equity_research_agent.models.business_analysis import (
     BusinessAnalysisEvidence,
 )
 from equity_research_agent.models.company import CompanyProfile, SecurityIdentity
+from equity_research_agent.models.filings import (
+    AnnualReportFormType,
+    FilingReference,
+)
 from equity_research_agent.models.financial_quality import (
     FinancialQualityAnalysis,
     FinancialQualityEvidence,
@@ -28,6 +32,7 @@ from equity_research_agent.models.synthesis import ResearchSynthesis, SynthesisE
 
 __all__ = [
     "AnnualFinancials",
+    "AnnualReportFormType",
     "BalanceSheet",
     "BearAnalysis",
     "BearRisk",
@@ -35,6 +40,7 @@ __all__ = [
     "BusinessAnalysisEvidence",
     "CashFlowStatement",
     "CompanyProfile",
+    "FilingReference",
     "FiscalPeriod",
     "FinancialMetrics",
     "FinancialQualityAnalysis",

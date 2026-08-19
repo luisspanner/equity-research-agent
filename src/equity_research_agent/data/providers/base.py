@@ -3,6 +3,7 @@
 from typing import Protocol, runtime_checkable
 
 from equity_research_agent.models.company import CompanyProfile
+from equity_research_agent.models.filings import FilingReference
 from equity_research_agent.models.financials import AnnualFinancials, MarketSnapshot
 
 
@@ -22,3 +23,16 @@ class FinancialDataProvider(Protocol):
 
     def get_market_snapshot(self, ticker: str) -> MarketSnapshot:
         """Return a normalized, sourced market snapshot."""
+
+
+@runtime_checkable
+class FilingProvider(Protocol):
+    """Discover primary-source annual-report filings for one issuer.
+
+    This is deliberately separate from ``FinancialDataProvider``: filings are
+    documents identified by an issuer CIK, not normalized statement data keyed
+    by a listed ticker.
+    """
+
+    def get_latest_annual_report(self, cik: str) -> FilingReference:
+        """Return sourced metadata for the issuer's most recent annual report."""

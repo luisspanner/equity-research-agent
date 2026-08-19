@@ -1,0 +1,46 @@
+"""Domain models for discovered primary-source company filings."""
+
+from datetime import date
+from typing import Annotated, Literal, TypeAlias, get_args
+
+from pydantic import Field, HttpUrl, StringConstraints, model_validator
+
+from equity_research_agent.models.common import Cik, DomainModel
+from equity_research_agent.models.provenance import SourceReference
+
+AnnualReportFormType: TypeAlias = Literal["10-K", "20-F"]
+
+ANNUAL_REPORT_FORM_TYPES: tuple[AnnualReportFormType, ...] = get_args(
+    AnnualReportFormType
+)
+
+AccessionNumber: TypeAlias = Annotated[
+    str,
+    StringConstraints(pattern=r"^\d{10}-\d{2}-\d{6}$"),
+]
+
+
+class FilingReference(DomainModel):
+    """Metadata for one discovered annual report, without its document text.
+
+    The filing document itself is intentionally not retrieved here. ``sources``
+    records where this metadata came from; ``document_url`` only identifies the
+    document a later slice may fetch.
+    """
+
+    cik: Cik
+    form_type: AnnualReportFormType
+    accession_number: AccessionNumber
+    period_end: date
+    filed_on: date
+    document_url: HttpUrl
+    sources: tuple[SourceReference, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_filing_order(self) -> "FilingReference":
+        """Reject annual reports filed before the period they cover has ended."""
+
+        if self.filed_on < self.period_end:
+            raise ValueError("filed_on must not precede period_end")
+
+        return self
