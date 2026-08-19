@@ -11,6 +11,10 @@ from equity_research_agent.models.business_analysis import (
     BusinessAnalysisEvidence,
 )
 from equity_research_agent.models.company import CompanyProfile, SecurityIdentity
+from equity_research_agent.models.financial_quality import (
+    FinancialQualityAnalysis,
+    FinancialQualityEvidence,
+)
 from equity_research_agent.models.metrics import FinancialMetrics, MetricUnavailability
 from equity_research_agent.models.provenance import SourceReference
 from equity_research_agent.models.synthesis import ResearchSynthesis, SynthesisEvidence
@@ -114,6 +118,35 @@ def make_bear_analysis() -> BearAnalysis:
     )
 
 
+def make_financial_quality_analysis() -> FinancialQualityAnalysis:
+    """Create sourced financial-quality analysis for report rendering."""
+
+    overall_assessment = FinancialQualityEvidence(
+        claim="Profitability appears healthy based on the supplied metrics.",
+        metric_names=("operating_margin",),
+        source_ids=("TEST-overview",),
+    )
+    return FinancialQualityAnalysis(
+        overall_assessment=overall_assessment,
+        strengths=(
+            FinancialQualityEvidence(
+                claim="Free cash flow margin is a financial strength.",
+                metric_names=("fcf_margin",),
+                source_ids=("TEST-overview",),
+            ),
+        ),
+        concerns=(
+            FinancialQualityEvidence(
+                claim="Net debt warrants continued monitoring.",
+                metric_names=("net_debt",),
+                source_ids=("TEST-overview",),
+            ),
+        ),
+        limitations=("The supplied metrics do not include peer comparisons.",),
+        sources=(make_source(),),
+    )
+
+
 def make_synthesis() -> ResearchSynthesis:
     """Create sourced final synthesis for report rendering."""
 
@@ -141,6 +174,7 @@ def render_fixture_report() -> str:
         make_metrics(),
         make_business_analysis(),
         make_bear_analysis(),
+        make_financial_quality_analysis(),
         make_synthesis(),
     )
 
@@ -150,11 +184,13 @@ def test_render_report_contains_identity_sections_and_analyst_content() -> None:
 
     assert "# Test Company (TEST)" in report
     assert "## Deterministic Financial Metrics" in report
+    assert "## Financial Quality (LLM Interpretation)" in report
     assert "## Business Analysis (LLM Interpretation)" in report
     assert "## Bear Case (LLM Interpretation)" in report
     assert "## Research Synthesis (LLM Interpretation)" in report
     assert "Subscription software provider." in report
     assert "Customer concentration could increase volatility." in report
+    assert "Profitability appears healthy based on the supplied metrics." in report
     assert "A balanced research summary is warranted." in report
     assert "not an investment recommendation" in report
 
@@ -176,6 +212,36 @@ def test_render_report_includes_citations_and_consolidated_sources() -> None:
     assert "[TEST-overview]" in report
     assert "https://example.com/company-overview" in report
     assert "captured 2026-08-18" in report
+
+
+def test_render_report_financial_quality_omits_validation_metric_names() -> None:
+    report = render_fixture_report()
+
+    assert "Free cash flow margin is a financial strength. [TEST-overview]" in report
+    assert "Net debt warrants continued monitoring. [TEST-overview]" in report
+    assert "fcf_margin" not in report
+    assert "## Financial Quality (LLM Interpretation)" in report
+    assert report.index("## Financial Quality (LLM Interpretation)") < report.index(
+        "## Business Analysis (LLM Interpretation)"
+    )
+
+
+def test_render_report_omits_empty_financial_quality_finding_headings() -> None:
+    analysis = make_financial_quality_analysis().model_copy(
+        update={"strengths": (), "concerns": ()}
+    )
+    report = render_research_report(
+        make_profile(),
+        make_metrics(),
+        make_business_analysis(),
+        make_bear_analysis(),
+        analysis,
+        make_synthesis(),
+    )
+
+    assert "### Overall Assessment" in report
+    assert "### Strengths" not in report
+    assert "### Concerns" not in report
 
 
 def test_render_report_is_deterministic_for_identical_inputs() -> None:

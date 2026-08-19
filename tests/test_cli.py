@@ -1,8 +1,21 @@
 """Tests for V0 command-line research orchestration."""
 
+from datetime import date
+from decimal import Decimal
+
 import pytest
+from pydantic import HttpUrl
 
 from equity_research_agent import main, run_research
+from equity_research_agent.models.financial_quality import (
+    FinancialQualityAnalysis,
+    FinancialQualityEvidence,
+)
+from equity_research_agent.models.financial_risk import (
+    FinancialRiskContext,
+    FinancialRiskMetric,
+)
+from equity_research_agent.models.provenance import SourceReference
 
 
 def test_run_research_orchestrates_the_v0_components(
@@ -16,6 +29,7 @@ def test_run_research_orchestrates_the_v0_components(
     financial_risk_context = object()
     business_analysis = object()
     bear_analysis = object()
+    financial_quality_analysis = object()
     synthesis = object()
 
     class FakeProvider:
@@ -59,6 +73,7 @@ def test_run_research_orchestrates_the_v0_components(
             received_profile: object,
             received_business_analysis: object,
             received_bear_analysis: object,
+            received_financial_quality_analysis: object,
         ) -> object:
             events.append(
                 (
@@ -66,9 +81,21 @@ def test_run_research_orchestrates_the_v0_components(
                     received_profile,
                     received_business_analysis,
                     received_bear_analysis,
+                    received_financial_quality_analysis,
                 )
             )
             return synthesis
+
+    class FakeFinancialQualityAnalyst:
+        def analyze(
+            self,
+            received_profile: object,
+            received_financial_risk_context: object,
+        ) -> object:
+            events.append(
+                ("financial-quality", received_profile, received_financial_risk_context)
+            )
+            return financial_quality_analysis
 
     def fake_assemble(
         received_financials: object, received_market_snapshot: object
@@ -103,12 +130,17 @@ def test_run_research_orchestrates_the_v0_components(
         "equity_research_agent.build_financial_risk_context", fake_build_context
     )
     monkeypatch.setattr("equity_research_agent.render_research_report", fake_render)
+    monkeypatch.setattr(
+        "equity_research_agent.validate_financial_quality_provenance",
+        lambda analysis, context: None,
+    )
 
     report = run_research(
         "ASML",
         FakeProvider(),  # type: ignore[arg-type]
         FakeBusinessAnalyst(),  # type: ignore[arg-type]
         FakeBearAnalyst(),  # type: ignore[arg-type]
+        FakeFinancialQualityAnalyst(),  # type: ignore[arg-type]
         FakeSynthesizer(),  # type: ignore[arg-type]
     )
 
@@ -121,9 +153,176 @@ def test_run_research_orchestrates_the_v0_components(
         ("financial-risk", metrics, financials, market_snapshot),
         ("business", profile),
         ("bear", profile, business_analysis, financial_risk_context),
-        ("synthesis", profile, business_analysis, bear_analysis),
-        ("report", profile, metrics, business_analysis, bear_analysis, synthesis),
+        ("financial-quality", profile, financial_risk_context),
+        (
+            "synthesis",
+            profile,
+            business_analysis,
+            bear_analysis,
+            financial_quality_analysis,
+        ),
+        (
+            "report",
+            profile,
+            metrics,
+            business_analysis,
+            bear_analysis,
+            financial_quality_analysis,
+            synthesis,
+        ),
     ]
+
+
+def test_run_research_rejects_invalid_financial_quality_protocol_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = SourceReference(
+        provider="test_provider",
+        source_type="income_statement",
+        source_id="TEST-income-2025",
+        url=HttpUrl("https://example.com/income-statement"),
+        captured_on=date(2026, 8, 19),
+    )
+    context = FinancialRiskContext(
+        metrics=(
+            FinancialRiskMetric(
+                metric="operating_margin",
+                value=Decimal("0.25"),
+                unit="percentage",
+                source_ids=(source.source_id,),
+            ),
+        ),
+        sources=(source,),
+    )
+    invalid_analysis = FinancialQualityAnalysis(
+        overall_assessment=FinancialQualityEvidence(
+            claim="This claim refers to an unavailable metric.",
+            metric_names=("unknown_metric",),
+            source_ids=(source.source_id,),
+        ),
+        sources=(source,),
+    )
+
+    class FakeProvider:
+        def get_company_profile(self, ticker: str) -> object:
+            return object()
+
+        def get_annual_financials(self, ticker: str) -> object:
+            return object()
+
+        def get_market_snapshot(self, ticker: str) -> object:
+            return object()
+
+    class FakeFinancialQualityAnalyst:
+        def analyze(
+            self, profile: object, risk_context: object
+        ) -> FinancialQualityAnalysis:
+            return invalid_analysis
+
+    class FakeBusinessAnalyst:
+        def analyze(self, profile: object) -> object:
+            return object()
+
+    class FakeBearAnalyst:
+        def analyze(
+            self, profile: object, business_analysis: object, risk_context: object
+        ) -> object:
+            return object()
+
+    monkeypatch.setattr(
+        "equity_research_agent.assemble_financial_metrics", lambda *args: object()
+    )
+    monkeypatch.setattr(
+        "equity_research_agent.build_financial_risk_context", lambda *args: context
+    )
+
+    with pytest.raises(ValueError, match="unknown metric names"):
+        run_research(
+            "TEST",
+            FakeProvider(),  # type: ignore[arg-type]
+            FakeBusinessAnalyst(),  # type: ignore[arg-type]
+            FakeBearAnalyst(),  # type: ignore[arg-type]
+            FakeFinancialQualityAnalyst(),  # type: ignore[arg-type]
+            object(),  # type: ignore[arg-type]
+        )
+
+
+def test_run_research_rejects_altered_financial_quality_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = SourceReference(
+        provider="test_provider",
+        source_type="income_statement",
+        source_id="TEST-income-2025",
+        url=HttpUrl("https://example.com/income-statement"),
+        captured_on=date(2026, 8, 19),
+    )
+    context = FinancialRiskContext(
+        metrics=(
+            FinancialRiskMetric(
+                metric="operating_margin",
+                value=Decimal("0.25"),
+                unit="percentage",
+                source_ids=(source.source_id,),
+            ),
+        ),
+        sources=(source,),
+    )
+    altered_analysis = FinancialQualityAnalysis(
+        overall_assessment=FinancialQualityEvidence(
+            claim="The supplied metric supports an assessment.",
+            metric_names=("operating_margin",),
+            source_ids=(source.source_id,),
+        ),
+        sources=(
+            source.model_copy(
+                update={"url": HttpUrl("https://example.com/altered-statement")}
+            ),
+        ),
+    )
+
+    class FakeProvider:
+        def get_company_profile(self, ticker: str) -> object:
+            return object()
+
+        def get_annual_financials(self, ticker: str) -> object:
+            return object()
+
+        def get_market_snapshot(self, ticker: str) -> object:
+            return object()
+
+    class FakeBusinessAnalyst:
+        def analyze(self, profile: object) -> object:
+            return object()
+
+    class FakeBearAnalyst:
+        def analyze(
+            self, profile: object, business_analysis: object, risk_context: object
+        ) -> object:
+            return object()
+
+    class FakeFinancialQualityAnalyst:
+        def analyze(
+            self, profile: object, risk_context: object
+        ) -> FinancialQualityAnalysis:
+            return altered_analysis
+
+    monkeypatch.setattr(
+        "equity_research_agent.assemble_financial_metrics", lambda *args: object()
+    )
+    monkeypatch.setattr(
+        "equity_research_agent.build_financial_risk_context", lambda *args: context
+    )
+
+    with pytest.raises(ValueError, match="source references do not match"):
+        run_research(
+            "TEST",
+            FakeProvider(),  # type: ignore[arg-type]
+            FakeBusinessAnalyst(),  # type: ignore[arg-type]
+            FakeBearAnalyst(),  # type: ignore[arg-type]
+            FakeFinancialQualityAnalyst(),  # type: ignore[arg-type]
+            object(),  # type: ignore[arg-type]
+        )
 
 
 def test_main_builds_components_and_prints_the_report(
@@ -133,6 +332,7 @@ def test_main_builds_components_and_prints_the_report(
     provider = object()
     business_analyst = object()
     bear_analyst = object()
+    financial_quality_analyst = object()
     synthesizer = object()
 
     def fake_alpha_vantage_provider(api_key: str) -> object:
@@ -157,6 +357,12 @@ def test_main_builds_components_and_prints_the_report(
             calls.append("synthesis")
             return synthesizer
 
+    class FakeFinancialQualityAnalyst:
+        @classmethod
+        def from_environment(cls) -> object:
+            calls.append("financial-quality")
+            return financial_quality_analyst
+
     def fake_run_research(*received_inputs: object) -> str:
         calls.append(("run", *received_inputs))
         return "# Test report"
@@ -170,6 +376,10 @@ def test_main_builds_components_and_prints_the_report(
     )
     monkeypatch.setattr("equity_research_agent.GroqBearAnalyst", FakeBearAnalyst)
     monkeypatch.setattr(
+        "equity_research_agent.GroqFinancialQualityAnalyst",
+        FakeFinancialQualityAnalyst,
+    )
+    monkeypatch.setattr(
         "equity_research_agent.GroqResearchSynthesizer", FakeSynthesizer
     )
     monkeypatch.setattr("equity_research_agent.run_research", fake_run_research)
@@ -181,8 +391,17 @@ def test_main_builds_components_and_prints_the_report(
         ("provider", "alpha-key"),
         "business",
         "bear",
+        "financial-quality",
         "synthesis",
-        ("run", "ASML", provider, business_analyst, bear_analyst, synthesizer),
+        (
+            "run",
+            "ASML",
+            provider,
+            business_analyst,
+            bear_analyst,
+            financial_quality_analyst,
+            synthesizer,
+        ),
     ]
 
 

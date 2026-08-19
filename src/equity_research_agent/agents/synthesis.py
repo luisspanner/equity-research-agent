@@ -5,6 +5,7 @@ import json
 from equity_research_agent.models.bear_analysis import BearAnalysis
 from equity_research_agent.models.business_analysis import BusinessAnalysis
 from equity_research_agent.models.company import CompanyProfile
+from equity_research_agent.models.financial_quality import FinancialQualityAnalysis
 from equity_research_agent.models.provenance import SourceReference
 
 
@@ -12,10 +13,15 @@ def build_research_synthesis_prompt(
     profile: CompanyProfile,
     business_analysis: BusinessAnalysis,
     bear_analysis: BearAnalysis,
+    financial_quality_analysis: FinancialQualityAnalysis,
 ) -> str:
     """Build a deterministic synthesis prompt from sourced qualitative inputs."""
 
-    sources = _merge_sources(business_analysis.sources, bear_analysis.sources)
+    sources = _merge_sources(
+        business_analysis.sources,
+        bear_analysis.sources,
+        financial_quality_analysis.sources,
+    )
     context = {
         "company": {
             "name": profile.name,
@@ -26,6 +32,9 @@ def build_research_synthesis_prompt(
             mode="json", exclude={"sources"}
         ),
         "prior_bear_analysis": bear_analysis.model_dump(
+            mode="json", exclude={"sources"}
+        ),
+        "prior_financial_quality_analysis": financial_quality_analysis.model_dump(
             mode="json", exclude={"sources"}
         ),
         "sources": [
@@ -41,11 +50,11 @@ def build_research_synthesis_prompt(
 
     return """You are the Research Synthesizer for an equity research workflow.
 
-Use only the supplied context. Treat the prior Business and Bear Analyses as
-LLM interpretations, not as new evidence. Do not invent facts or perform
-financial calculations. Produce a balanced research summary, not an investment
-recommendation. Cite every factual claim using one or more supplied source IDs,
-and identify what still needs further research.
+Use only the supplied context. Treat the prior Business, Bear, and Financial
+Quality Analyses as LLM interpretations, not as new evidence. Do not invent
+facts or perform financial calculations. Produce a balanced research summary,
+not an investment recommendation. Cite every factual claim using one or more
+supplied source IDs, and identify what still needs further research.
 
 Return JSON with these fields:
 - investment_thesis: string
@@ -62,11 +71,12 @@ Research context:
 def _merge_sources(
     business_sources: tuple[SourceReference, ...],
     bear_sources: tuple[SourceReference, ...],
+    financial_quality_sources: tuple[SourceReference, ...],
 ) -> tuple[SourceReference, ...]:
     """Combine sources while rejecting conflicting references with one source ID."""
 
     sources_by_id: dict[str, SourceReference] = {}
-    for source in (*business_sources, *bear_sources):
+    for source in (*business_sources, *bear_sources, *financial_quality_sources):
         existing_source = sources_by_id.get(source.source_id)
         if existing_source is not None and existing_source != source:
             raise ValueError(

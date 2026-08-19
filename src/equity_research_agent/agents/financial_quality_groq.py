@@ -1,4 +1,4 @@
-"""Groq-backed execution of the source-bounded research-synthesis prompt."""
+"""Groq-backed execution of the source-bounded Financial Quality Analyst."""
 
 import json
 import os
@@ -9,23 +9,21 @@ from urllib.request import Request, urlopen
 
 from pydantic import ValidationError
 
-from equity_research_agent.agents.synthesis import (
-    _merge_sources,
-    build_research_synthesis_prompt,
+from equity_research_agent.agents.financial_quality import (
+    build_financial_quality_analysis_prompt,
+    validate_financial_quality_provenance,
 )
-from equity_research_agent.models.bear_analysis import BearAnalysis
-from equity_research_agent.models.business_analysis import BusinessAnalysis
 from equity_research_agent.models.company import CompanyProfile
 from equity_research_agent.models.financial_quality import FinancialQualityAnalysis
-from equity_research_agent.models.synthesis import ResearchSynthesis
+from equity_research_agent.models.financial_risk import FinancialRiskContext
 
 
-class GroqResearchSynthesizerError(RuntimeError):
-    """Raised when a Groq research-synthesis response cannot be used safely."""
+class GroqFinancialQualityAnalystError(RuntimeError):
+    """Raised when a Groq financial-quality response cannot be used safely."""
 
 
-class GroqResearchSynthesizer:
-    """Run the Research Synthesizer with Groq's OpenAI GPT-OSS 120B model."""
+class GroqFinancialQualityAnalyst:
+    """Run the Financial Quality Analyst with Groq's OpenAI GPT-OSS 120B model."""
 
     _API_URL = "https://api.groq.com/openai/v1/chat/completions"
     _DEFAULT_MODEL = "openai/gpt-oss-120b"
@@ -38,7 +36,7 @@ class GroqResearchSynthesizer:
         model: str = _DEFAULT_MODEL,
         timeout_seconds: float = 10.0,
     ) -> None:
-        """Create a synthesizer with explicit credentials and request settings."""
+        """Create an analyst with explicit credentials and request settings."""
 
         if not api_key.strip():
             raise ValueError("api_key must not be blank")
@@ -52,8 +50,8 @@ class GroqResearchSynthesizer:
         self._timeout_seconds = timeout_seconds
 
     @classmethod
-    def from_environment(cls) -> "GroqResearchSynthesizer":
-        """Create a synthesizer from the ``GROQ_API_KEY`` environment variable."""
+    def from_environment(cls) -> "GroqFinancialQualityAnalyst":
+        """Create an analyst from the ``GROQ_API_KEY`` environment variable."""
 
         api_key = os.environ.get("GROQ_API_KEY")
         if api_key is None:
@@ -63,22 +61,17 @@ class GroqResearchSynthesizer:
     def analyze(
         self,
         profile: CompanyProfile,
-        business_analysis: BusinessAnalysis,
-        bear_analysis: BearAnalysis,
-        financial_quality_analysis: FinancialQualityAnalysis,
-    ) -> ResearchSynthesis:
-        """Return source-validated research synthesis for one company."""
+        financial_risk_context: FinancialRiskContext,
+    ) -> FinancialQualityAnalysis:
+        """Return source-validated financial-quality analysis for one company."""
 
         request_body = {
             "model": self._model,
             "messages": [
                 {
                     "role": "user",
-                    "content": build_research_synthesis_prompt(
-                        profile,
-                        business_analysis,
-                        bear_analysis,
-                        financial_quality_analysis,
+                    "content": build_financial_quality_analysis_prompt(
+                        profile, financial_risk_context
                     ),
                 }
             ],
@@ -88,31 +81,34 @@ class GroqResearchSynthesizer:
         response_content = _response_content(response_payload)
 
         try:
-            synthesis_payload = json.loads(response_content)
+            analysis_payload = json.loads(response_content)
         except JSONDecodeError:
-            raise GroqResearchSynthesizerError(
+            raise GroqFinancialQualityAnalystError(
                 "Groq response content must be valid JSON"
             ) from None
 
-        if not isinstance(synthesis_payload, dict):
-            raise GroqResearchSynthesizerError(
+        if not isinstance(analysis_payload, dict):
+            raise GroqFinancialQualityAnalystError(
                 "Groq response content must be a JSON object"
             )
 
-        synthesis_payload["sources"] = [
+        analysis_payload["sources"] = [
             source.model_dump(mode="json")
-            for source in _merge_sources(
-                business_analysis.sources,
-                bear_analysis.sources,
-                financial_quality_analysis.sources,
-            )
+            for source in financial_risk_context.sources
         ]
         try:
-            return ResearchSynthesis.model_validate_json(json.dumps(synthesis_payload))
+            analysis = FinancialQualityAnalysis.model_validate_json(
+                json.dumps(analysis_payload)
+            )
         except ValidationError:
-            raise GroqResearchSynthesizerError(
-                "Groq response does not match the ResearchSynthesis schema"
+            raise GroqFinancialQualityAnalystError(
+                "Groq response does not match the FinancialQualityAnalysis schema"
             ) from None
+        try:
+            validate_financial_quality_provenance(analysis, financial_risk_context)
+        except ValueError as error:
+            raise GroqFinancialQualityAnalystError(str(error)) from None
+        return analysis
 
     def _post(self, request_body: Mapping[str, object]) -> Mapping[str, object]:
         """Send a JSON chat-completions request without exposing credentials."""
@@ -131,12 +127,14 @@ class GroqResearchSynthesizer:
             with urlopen(request, timeout=self._timeout_seconds) as response:
                 response_payload = json.loads(response.read().decode("utf-8"))
         except (HTTPError, URLError, UnicodeDecodeError, JSONDecodeError):
-            raise GroqResearchSynthesizerError(
+            raise GroqFinancialQualityAnalystError(
                 "could not retrieve a valid Groq response"
             ) from None
 
         if not isinstance(response_payload, dict):
-            raise GroqResearchSynthesizerError("Groq response must be a JSON object")
+            raise GroqFinancialQualityAnalystError(
+                "Groq response must be a JSON object"
+            )
         return response_payload
 
 
@@ -145,17 +143,21 @@ def _response_content(payload: Mapping[str, object]) -> str:
 
     choices = payload.get("choices")
     if not isinstance(choices, list) or not choices:
-        raise GroqResearchSynthesizerError("Groq response has no completion choices")
+        raise GroqFinancialQualityAnalystError(
+            "Groq response has no completion choices"
+        )
 
     first_choice = choices[0]
     if not isinstance(first_choice, Mapping):
-        raise GroqResearchSynthesizerError("Groq completion choice must be an object")
+        raise GroqFinancialQualityAnalystError(
+            "Groq completion choice must be an object"
+        )
     message = first_choice.get("message")
     if not isinstance(message, Mapping):
-        raise GroqResearchSynthesizerError("Groq completion choice has no message")
+        raise GroqFinancialQualityAnalystError("Groq completion choice has no message")
     content = message.get("content")
     if not isinstance(content, str):
-        raise GroqResearchSynthesizerError(
+        raise GroqFinancialQualityAnalystError(
             "Groq completion message has no text content"
         )
     return content

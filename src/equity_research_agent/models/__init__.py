@@ -6,6 +6,10 @@ from equity_research_agent.models.business_analysis import (
     BusinessAnalysisEvidence,
 )
 from equity_research_agent.models.company import CompanyProfile, SecurityIdentity
+from equity_research_agent.models.financial_quality import (
+    FinancialQualityAnalysis,
+    FinancialQualityEvidence,
+)
 from equity_research_agent.models.financial_risk import (
     FinancialRiskContext,
     FinancialRiskMetric,
@@ -33,6 +37,8 @@ __all__ = [
     "CompanyProfile",
     "FiscalPeriod",
     "FinancialMetrics",
+    "FinancialQualityAnalysis",
+    "FinancialQualityEvidence",
     "FinancialRiskContext",
     "FinancialRiskMetric",
     "IncomeStatement",

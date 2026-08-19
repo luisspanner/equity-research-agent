@@ -5,6 +5,10 @@ from decimal import Decimal
 from equity_research_agent.models.bear_analysis import BearAnalysis
 from equity_research_agent.models.business_analysis import BusinessAnalysis
 from equity_research_agent.models.company import CompanyProfile
+from equity_research_agent.models.financial_quality import (
+    FinancialQualityAnalysis,
+    FinancialQualityEvidence,
+)
 from equity_research_agent.models.metrics import FinancialMetrics
 from equity_research_agent.models.provenance import SourceReference
 from equity_research_agent.models.synthesis import ResearchSynthesis
@@ -15,6 +19,7 @@ def render_research_report(
     metrics: FinancialMetrics,
     business_analysis: BusinessAnalysis,
     bear_analysis: BearAnalysis,
+    financial_quality_analysis: FinancialQualityAnalysis,
     synthesis: ResearchSynthesis,
 ) -> str:
     """Render sourced analysis into deterministic, human-readable Markdown."""
@@ -75,6 +80,23 @@ def render_research_report(
         _metric_line(
             "EV / EBITDA", metrics.ev_to_ebitda, "multiple", metrics, "ev_to_ebitda"
         ),
+        "",
+        "## Financial Quality (LLM Interpretation)",
+        "",
+        "### Overall Assessment",
+        "",
+        _evidence_line(
+            financial_quality_analysis.overall_assessment.claim,
+            financial_quality_analysis.overall_assessment.source_ids,
+        ),
+        "",
+        *_financial_quality_findings(
+            "Strengths", financial_quality_analysis.strengths
+        ),
+        *_financial_quality_findings(
+            "Concerns", financial_quality_analysis.concerns
+        ),
+        *_analysis_limitations(financial_quality_analysis.limitations),
         "",
         "## Business Analysis (LLM Interpretation)",
         "",
@@ -203,6 +225,21 @@ def _evidence_line(claim: str, source_ids: tuple[str, ...]) -> str:
 
     citations = ", ".join(f"[{source_id}]" for source_id in source_ids)
     return f"- {claim} {citations}"
+
+
+def _financial_quality_findings(
+    heading: str, findings: tuple[FinancialQualityEvidence, ...]
+) -> list[str]:
+    """Render an optional financial-quality finding group."""
+
+    if not findings:
+        return []
+    return [
+        f"### {heading}",
+        "",
+        *[_evidence_line(item.claim, item.source_ids) for item in findings],
+        "",
+    ]
 
 
 def _risk_line(risk: str, mechanism: str, source_ids: tuple[str, ...]) -> str:

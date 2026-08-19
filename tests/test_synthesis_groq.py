@@ -19,6 +19,10 @@ from equity_research_agent.models.business_analysis import (
     BusinessAnalysisEvidence,
 )
 from equity_research_agent.models.company import CompanyProfile, SecurityIdentity
+from equity_research_agent.models.financial_quality import (
+    FinancialQualityAnalysis,
+    FinancialQualityEvidence,
+)
 from equity_research_agent.models.provenance import SourceReference
 
 
@@ -114,6 +118,25 @@ def make_bear_analysis(
     )
 
 
+def make_financial_quality_analysis(
+    sources: tuple[SourceReference, ...] | None = None,
+) -> FinancialQualityAnalysis:
+    """Create sourced prior financial-quality analysis for a Groq request."""
+
+    analysis_sources = sources or (make_source("TEST-income-statement"),)
+    evidence = FinancialQualityEvidence(
+        claim="Operating margin is supported by the supplied statement.",
+        metric_names=("operating_margin",),
+        source_ids=(analysis_sources[0].source_id,),
+    )
+    return FinancialQualityAnalysis(
+        overall_assessment=evidence,
+        strengths=(evidence,),
+        concerns=(evidence,),
+        sources=analysis_sources,
+    )
+
+
 def make_completion(content: object) -> bytes:
     """Create a minimal successful Groq chat-completions payload."""
 
@@ -131,8 +154,8 @@ def valid_synthesis_content() -> str:
             "open_research_questions": ["Which customers drive revenue?"],
             "evidence": [
                 {
-                    "claim": "The company sells enterprise software subscriptions.",
-                    "source_ids": ["TEST-overview"],
+                    "claim": "Operating margin is supported by the supplied statement.",
+                    "source_ids": ["TEST-income-statement"],
                 }
             ],
         }
@@ -154,11 +177,15 @@ def test_analyze_sends_json_mode_request_and_attaches_merged_sources(
     )
 
     synthesis = GroqResearchSynthesizer("test-key").analyze(
-        make_profile(), make_business_analysis(), make_bear_analysis()
+        make_profile(),
+        make_business_analysis(),
+        make_bear_analysis(),
+        make_financial_quality_analysis(),
     )
 
     assert synthesis.sources[0].source_id == "TEST-overview"
-    assert synthesis.evidence[0].source_ids == ("TEST-overview",)
+    assert synthesis.sources[1].source_id == "TEST-income-statement"
+    assert synthesis.evidence[0].source_ids == ("TEST-income-statement",)
     request = recorded_requests[0]
     assert request.full_url == "https://api.groq.com/openai/v1/chat/completions"
     assert request.get_header("Authorization") == "Bearer test-key"
@@ -185,6 +212,27 @@ def test_analyze_rejects_conflicting_sources_before_request(
             make_profile(),
             make_business_analysis(),
             make_bear_analysis((conflicting_source,)),
+            make_financial_quality_analysis(),
+        )
+
+
+def test_analyze_rejects_conflicting_financial_quality_sources_before_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unexpected_urlopen(request: Request, *, timeout: float) -> FakeResponse:
+        raise AssertionError("the synthesis request must not be sent")
+
+    monkeypatch.setattr(
+        "equity_research_agent.agents.synthesis_groq.urlopen", unexpected_urlopen
+    )
+    conflicting_source = make_source("TEST-overview", provider="other_provider")
+
+    with pytest.raises(ValueError, match="conflicting source references"):
+        GroqResearchSynthesizer("test-key").analyze(
+            make_profile(),
+            make_business_analysis(),
+            make_bear_analysis(),
+            make_financial_quality_analysis((conflicting_source,)),
         )
 
 
@@ -222,7 +270,10 @@ def test_network_errors_are_safely_wrapped(
 
     with pytest.raises(GroqResearchSynthesizerError) as error:
         GroqResearchSynthesizer("test-key").analyze(
-            make_profile(), make_business_analysis(), make_bear_analysis()
+            make_profile(),
+            make_business_analysis(),
+            make_bear_analysis(),
+            make_financial_quality_analysis(),
         )
 
     assert "test-key" not in str(error.value)
@@ -249,7 +300,10 @@ def test_invalid_groq_responses_are_rejected(
 
     with pytest.raises(GroqResearchSynthesizerError, match=message):
         GroqResearchSynthesizer("test-key").analyze(
-            make_profile(), make_business_analysis(), make_bear_analysis()
+            make_profile(),
+            make_business_analysis(),
+            make_bear_analysis(),
+            make_financial_quality_analysis(),
         )
 
 
@@ -278,5 +332,8 @@ def test_schema_invalid_response_is_rejected(monkeypatch: pytest.MonkeyPatch) ->
 
     with pytest.raises(GroqResearchSynthesizerError, match="ResearchSynthesis schema"):
         GroqResearchSynthesizer("test-key").analyze(
-            make_profile(), make_business_analysis(), make_bear_analysis()
+            make_profile(),
+            make_business_analysis(),
+            make_bear_analysis(),
+            make_financial_quality_analysis(),
         )

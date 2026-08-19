@@ -12,6 +12,10 @@ from equity_research_agent.models.business_analysis import (
     BusinessAnalysisEvidence,
 )
 from equity_research_agent.models.company import CompanyProfile, SecurityIdentity
+from equity_research_agent.models.financial_quality import (
+    FinancialQualityAnalysis,
+    FinancialQualityEvidence,
+)
 from equity_research_agent.models.provenance import SourceReference
 from equity_research_agent.models.synthesis import ResearchSynthesis, SynthesisEvidence
 
@@ -85,17 +89,41 @@ def make_bear_analysis(
     )
 
 
+def make_financial_quality_analysis(
+    sources: tuple[SourceReference, ...] | None = None,
+) -> FinancialQualityAnalysis:
+    """Create sourced prior financial-quality analysis for synthesis tests."""
+
+    analysis_sources = sources or (make_source("TEST-income-statement"),)
+    evidence = FinancialQualityEvidence(
+        claim="Operating margin is supported by the supplied statement.",
+        metric_names=("operating_margin",),
+        source_ids=(analysis_sources[0].source_id,),
+    )
+    return FinancialQualityAnalysis(
+        overall_assessment=evidence,
+        strengths=(evidence,),
+        concerns=(evidence,),
+        sources=analysis_sources,
+    )
+
+
 def test_prompt_preserves_the_evidence_boundary_and_deduplicates_sources() -> None:
     prompt = build_research_synthesis_prompt(
-        make_profile(), make_business_analysis(), make_bear_analysis()
+        make_profile(),
+        make_business_analysis(),
+        make_bear_analysis(),
+        make_financial_quality_analysis(),
     )
 
     assert "Test Company" in prompt
     assert "Subscription software provider." in prompt
     assert "Customer concentration could increase volatility." in prompt
+    assert "Operating margin is supported by the supplied statement." in prompt
     assert "not as new evidence" in prompt
-    assert "not an investment\nrecommendation" in prompt
+    assert "not an investment recommendation" in prompt
     assert prompt.count('"source_id": "TEST-overview"') == 1
+    assert prompt.count('"source_id": "TEST-income-statement"') == 1
 
 
 def test_prompt_rejects_conflicting_source_references() -> None:
@@ -112,6 +140,25 @@ def test_prompt_rejects_conflicting_source_references() -> None:
             make_profile(),
             make_business_analysis(),
             make_bear_analysis((conflicting_source,)),
+            make_financial_quality_analysis(),
+        )
+
+
+def test_prompt_rejects_conflicting_financial_quality_sources() -> None:
+    conflicting_source = SourceReference(
+        provider="other_provider",
+        source_type="income_statement",
+        source_id="TEST-overview",
+        url=HttpUrl("https://example.com/other-overview"),
+        captured_on=date(2026, 8, 18),
+    )
+
+    with pytest.raises(ValueError, match="conflicting source references"):
+        build_research_synthesis_prompt(
+            make_profile(),
+            make_business_analysis(),
+            make_bear_analysis(),
+            make_financial_quality_analysis((conflicting_source,)),
         )
 
 
