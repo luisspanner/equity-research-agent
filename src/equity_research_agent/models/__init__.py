@@ -9,6 +9,7 @@ from equity_research_agent.models.company import CompanyProfile, SecurityIdentit
 from equity_research_agent.models.filings import (
     AnnualReportFormType,
     FilingReference,
+    FilingText,
     RetrievedFiling,
 )
 from equity_research_agent.models.financial_quality import (
@@ -42,6 +43,7 @@ __all__ = [
     "CashFlowStatement",
     "CompanyProfile",
     "FilingReference",
+    "FilingText",
     "FiscalPeriod",
     "FinancialMetrics",
     "FinancialQualityAnalysis",

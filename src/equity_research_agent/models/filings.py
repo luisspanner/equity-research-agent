@@ -65,3 +65,16 @@ class RetrievedFiling(DomainModel):
     byte_size: int = Field(gt=0)
     untrusted_text: DocumentText
     sources: tuple[SourceReference, ...] = Field(min_length=1)
+
+
+class FilingText(DomainModel):
+    """Readable text extracted from one retrieved filing document.
+
+    Extraction changes only the representation. The text remains untrusted
+    third-party prose and keeps the provenance of the document it came from, so
+    later sectioning and citation stay traceable to a filing.
+    """
+
+    filing: FilingReference
+    untrusted_text: DocumentText
+    sources: tuple[SourceReference, ...] = Field(min_length=1)

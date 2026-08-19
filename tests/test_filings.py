@@ -9,6 +9,7 @@ from pydantic import HttpUrl, ValidationError
 from equity_research_agent.models.filings import (
     ANNUAL_REPORT_FORM_TYPES,
     FilingReference,
+    FilingText,
     RetrievedFiling,
 )
 from equity_research_agent.models.provenance import SourceReference
@@ -71,6 +72,17 @@ def make_retrieved_filing(**overrides: Any) -> RetrievedFiling:
         "sources": (make_document_source(),),
     }
     return RetrievedFiling(**{**fields, **overrides})
+
+
+def make_filing_text(**overrides: Any) -> FilingText:
+    """Create valid extracted filing text with optional field overrides."""
+
+    fields: dict[str, Any] = {
+        "filing": make_filing(),
+        "untrusted_text": "Item 3.D. Risk Factors\nWe derive a substantial portion",
+        "sources": (make_document_source(),),
+    }
+    return FilingText(**{**fields, **overrides})
 
 
 def test_annual_report_form_types_are_derived_from_the_literal() -> None:
@@ -186,3 +198,36 @@ def test_retrieved_filing_requires_a_content_type() -> None:
 def test_retrieved_filing_forbids_unknown_fields() -> None:
     with pytest.raises(ValidationError):
         make_retrieved_filing(parsed_sections=("Item 3.D.",))
+
+
+def test_filing_text_retains_its_filing_and_provenance() -> None:
+    extracted = make_filing_text()
+
+    assert extracted.filing.accession_number == "0000937966-26-000008"
+    assert extracted.sources[0].source_id == "0000937966-26-000008"
+
+
+def test_filing_text_keeps_calling_its_content_untrusted() -> None:
+    assert "untrusted_text" in FilingText.model_fields
+
+
+def test_filing_text_is_immutable() -> None:
+    extracted = make_filing_text()
+
+    with pytest.raises(ValidationError):
+        extracted.untrusted_text = "replaced"  # type: ignore[misc]
+
+
+def test_filing_text_rejects_empty_text() -> None:
+    with pytest.raises(ValidationError):
+        make_filing_text(untrusted_text="")
+
+
+def test_filing_text_requires_at_least_one_source() -> None:
+    with pytest.raises(ValidationError):
+        make_filing_text(sources=())
+
+
+def test_filing_text_forbids_unknown_fields() -> None:
+    with pytest.raises(ValidationError):
+        make_filing_text(summary="ASML depends on a few customers")
