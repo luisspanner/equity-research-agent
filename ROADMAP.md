@@ -28,10 +28,12 @@ Completed after V0:
   Synthesis, and the Markdown report
 - [x] Focused duplication cleanup for shared Groq transport/response mechanics
   and exact source-reference merging
+- [x] EDGAR annual-report discovery, metadata only, not yet used by the
+  research workflow
 
-No implementation slice is currently active. The next step is to select and
-review one bounded Phase 2 filing-ingestion slice; the roadmap does not select
-or begin that work automatically.
+No implementation slice is currently active. Phase 2 has begun with filing
+discovery; the next step is to select and review one bounded filing-retrieval
+slice. The roadmap does not select or begin that work automatically.
 
 Live CLI runs are reserved for bug investigation or after several new features
 have accumulated. Unit, integration, lint, and type checks are the default
@@ -98,14 +100,22 @@ Build this incrementally:
   fallback policy;
 - improved qualitative citation provenance.
 
-### Next selection: first bounded filing-ingestion slice
+### Completed: filing discovery
 
-Before implementation, choose and review one small, independently testable
-slice. The initial decision should identify one primary filing source and
-document type, then determine whether the slice covers only the domain and
-provenance contract or also one minimal discovery/retrieval adapter. Do not
-combine filing discovery, parsing, search, and analyst integration in the same
-slice.
+The first ingestion slice chose SEC EDGAR as the primary source and the annual
+report as the document type, covering both `10-K` and `20-F` so foreign private
+issuers such as ASML are not a special case. It delivered the `FilingReference`
+domain and provenance contract together with one metadata-only discovery
+adapter, deliberately excluding document retrieval, parsing, search, and
+analyst integration.
+
+### Next selection: filing-document retrieval
+
+Retrieve the primary document identified by an existing `FilingReference` and
+represent it as sourced, explicitly untrusted raw text. Keep retrieval separate
+from parsing: knowing that a document was fetched, from where, and in what form
+is a testable capability on its own. Do not combine retrieval, parsing, search,
+and analyst integration in the same slice.
 
 Introduce dedicated Market, Moat, Growth, or Risk Analysts only when each has
 a distinct evidence boundary, responsibility, and evaluation criterion—not
