@@ -3,7 +3,7 @@
 from typing import Protocol, runtime_checkable
 
 from equity_research_agent.models.company import CompanyProfile
-from equity_research_agent.models.filings import FilingReference
+from equity_research_agent.models.filings import FilingReference, RetrievedFiling
 from equity_research_agent.models.financials import AnnualFinancials, MarketSnapshot
 
 
@@ -36,3 +36,6 @@ class FilingProvider(Protocol):
 
     def get_latest_annual_report(self, cik: str) -> FilingReference:
         """Return sourced metadata for the issuer's most recent annual report."""
+
+    def get_document(self, filing: FilingReference) -> RetrievedFiling:
+        """Return the filing's primary document as sourced, untrusted text."""

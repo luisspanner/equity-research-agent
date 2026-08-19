@@ -9,6 +9,7 @@ from equity_research_agent.models.company import CompanyProfile, SecurityIdentit
 from equity_research_agent.models.filings import (
     AnnualReportFormType,
     FilingReference,
+    RetrievedFiling,
 )
 from equity_research_agent.models.financial_quality import (
     FinancialQualityAnalysis,
@@ -51,6 +52,7 @@ __all__ = [
     "MarketSnapshot",
     "MetricUnavailability",
     "ResearchSynthesis",
+    "RetrievedFiling",
     "SecurityIdentity",
     "SourceReference",
     "SynthesisEvidence",

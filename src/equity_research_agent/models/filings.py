@@ -5,7 +5,7 @@ from typing import Annotated, Literal, TypeAlias, get_args
 
 from pydantic import Field, HttpUrl, StringConstraints, model_validator
 
-from equity_research_agent.models.common import Cik, DomainModel
+from equity_research_agent.models.common import Cik, DomainModel, NonEmptyString
 from equity_research_agent.models.provenance import SourceReference
 
 AnnualReportFormType: TypeAlias = Literal["10-K", "20-F"]
@@ -18,6 +18,9 @@ AccessionNumber: TypeAlias = Annotated[
     str,
     StringConstraints(pattern=r"^\d{10}-\d{2}-\d{6}$"),
 ]
+
+DocumentText: TypeAlias = Annotated[str, StringConstraints(min_length=1)]
+"""Document text kept exactly as retrieved, without whitespace normalization."""
 
 
 class FilingReference(DomainModel):
@@ -44,3 +47,21 @@ class FilingReference(DomainModel):
             raise ValueError("filed_on must not precede period_end")
 
         return self
+
+
+class RetrievedFiling(DomainModel):
+    """One filing's primary document, retrieved but not yet interpreted.
+
+    ``untrusted_text`` is third-party prose written by the filer. It is evidence
+    to be quoted and cited, never instructions to be followed, and it must not
+    reach a model prompt outside an explicit evidence boundary.
+
+    ``byte_size`` records the retrieved payload, which differs from the decoded
+    text length whenever the document contains non-ASCII characters.
+    """
+
+    filing: FilingReference
+    content_type: NonEmptyString
+    byte_size: int = Field(gt=0)
+    untrusted_text: DocumentText
+    sources: tuple[SourceReference, ...] = Field(min_length=1)

@@ -1,4 +1,4 @@
-"""Tests for the discovered-filing domain model."""
+"""Tests for the discovered- and retrieved-filing domain models."""
 
 from datetime import date, datetime, timezone
 from typing import Any
@@ -9,6 +9,7 @@ from pydantic import HttpUrl, ValidationError
 from equity_research_agent.models.filings import (
     ANNUAL_REPORT_FORM_TYPES,
     FilingReference,
+    RetrievedFiling,
 )
 from equity_research_agent.models.provenance import SourceReference
 
@@ -41,6 +42,35 @@ def make_filing(**overrides: Any) -> FilingReference:
         "sources": (make_source(),),
     }
     return FilingReference(**{**fields, **overrides})
+
+
+def make_document_source() -> SourceReference:
+    """Create provenance for the retrieved filing document itself."""
+
+    return SourceReference(
+        provider="sec_edgar",
+        source_type="annual_report_document",
+        source_id="0000937966-26-000008",
+        url=HttpUrl(
+            "https://www.sec.gov/Archives/edgar/data/937966/"
+            "000093796626000008/asml-20251231.htm"
+        ),
+        retrieved_at=datetime(2026, 8, 19, 12, 0, tzinfo=timezone.utc),
+        period_end=date(2025, 12, 31),
+    )
+
+
+def make_retrieved_filing(**overrides: Any) -> RetrievedFiling:
+    """Create a valid retrieved filing with optional field overrides."""
+
+    fields: dict[str, Any] = {
+        "filing": make_filing(),
+        "content_type": "text/html",
+        "byte_size": 512,
+        "untrusted_text": "<html><body>Item 3.D. Risk Factors</body></html>",
+        "sources": (make_document_source(),),
+    }
+    return RetrievedFiling(**{**fields, **overrides})
 
 
 def test_annual_report_form_types_are_derived_from_the_literal() -> None:
@@ -106,3 +136,53 @@ def test_filing_reference_rejects_invalid_ciks(cik: str) -> None:
 def test_filing_reference_forbids_unknown_fields() -> None:
     with pytest.raises(ValidationError):
         make_filing(document_text="the full annual report")
+
+
+def test_retrieved_filing_retains_its_document_and_provenance() -> None:
+    retrieved = make_retrieved_filing()
+
+    assert retrieved.filing.accession_number == "0000937966-26-000008"
+    assert retrieved.content_type == "text/html"
+    assert "Risk Factors" in retrieved.untrusted_text
+    assert retrieved.sources[0].source_type == "annual_report_document"
+
+
+def test_retrieved_filing_is_immutable() -> None:
+    retrieved = make_retrieved_filing()
+
+    with pytest.raises(ValidationError):
+        retrieved.untrusted_text = "replaced"  # type: ignore[misc]
+
+
+def test_retrieved_filing_keeps_document_text_exactly_as_retrieved() -> None:
+    document_text = "\n  Item 3.D. Risk Factors  \n"
+
+    retrieved = make_retrieved_filing(untrusted_text=document_text)
+
+    assert retrieved.untrusted_text == document_text
+
+
+def test_retrieved_filing_rejects_empty_document_text() -> None:
+    with pytest.raises(ValidationError):
+        make_retrieved_filing(untrusted_text="")
+
+
+@pytest.mark.parametrize("byte_size", [0, -1])
+def test_retrieved_filing_rejects_nonpositive_byte_sizes(byte_size: int) -> None:
+    with pytest.raises(ValidationError):
+        make_retrieved_filing(byte_size=byte_size)
+
+
+def test_retrieved_filing_requires_at_least_one_source() -> None:
+    with pytest.raises(ValidationError):
+        make_retrieved_filing(sources=())
+
+
+def test_retrieved_filing_requires_a_content_type() -> None:
+    with pytest.raises(ValidationError):
+        make_retrieved_filing(content_type="")
+
+
+def test_retrieved_filing_forbids_unknown_fields() -> None:
+    with pytest.raises(ValidationError):
+        make_retrieved_filing(parsed_sections=("Item 3.D.",))

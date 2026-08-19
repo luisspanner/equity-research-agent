@@ -151,6 +151,38 @@ def test_normalizer_rejects_a_missing_primary_document() -> None:
         normalize_latest_annual_report(submissions, make_source())
 
 
+@pytest.mark.parametrize(
+    "primary_document",
+    [
+        "../000093796625000003/asml-20241231.htm",
+        "subdirectory/asml-20251231.htm",
+        "..",
+        "asml-2025..htm",
+        "asml 20251231.htm",
+        "asml-20251231.htm?query=1",
+        "..%2Fasml-20241231.htm",
+        "-asml-20251231.htm",
+    ],
+)
+def test_normalizer_rejects_document_names_that_could_alter_the_url_path(
+    primary_document: str,
+) -> None:
+    submissions = load_submissions()
+    recent(submissions)["primaryDocument"][1] = primary_document
+
+    with pytest.raises(EdgarNormalizationError, match="plain EDGAR file name"):
+        normalize_latest_annual_report(submissions, make_source())
+
+
+def test_normalizer_accepts_conventional_edgar_document_names() -> None:
+    submissions = load_submissions()
+    recent(submissions)["primaryDocument"][1] = "0000937966-26-000008.txt"
+
+    filing = normalize_latest_annual_report(submissions, make_source())
+
+    assert str(filing.document_url).endswith("/0000937966-26-000008.txt")
+
+
 def test_normalizer_rejects_misaligned_parallel_arrays() -> None:
     submissions = load_submissions()
     recent(submissions)["reportDate"] = ["2025-12-31"]

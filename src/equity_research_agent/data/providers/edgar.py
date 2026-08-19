@@ -1,5 +1,6 @@
 """Pure normalization of the SEC EDGAR submissions-index payload contract."""
 
+import re
 from collections.abc import Mapping, Sequence
 from datetime import date
 
@@ -13,6 +14,8 @@ from equity_research_agent.models.filings import (
 from equity_research_agent.models.provenance import SourceReference
 
 ARCHIVES_BASE_URL = "https://www.sec.gov/Archives/edgar/data"
+
+_PRIMARY_DOCUMENT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 _RECENT_FILING_FIELDS = (
     "accessionNumber",
@@ -60,11 +63,7 @@ def normalize_latest_annual_report(
         )
 
     accession_number = columns["accessionNumber"][latest_index]
-    primary_document = columns["primaryDocument"][latest_index].strip()
-    if not primary_document:
-        raise EdgarNormalizationError(
-            "latest annual report has no primary document"
-        )
+    primary_document = _primary_document_name(columns["primaryDocument"][latest_index])
 
     try:
         return FilingReference(
@@ -91,6 +90,24 @@ def _annual_report_form_type(form: str) -> AnnualReportFormType | None:
         if form == form_type:
             return form_type
     return None
+
+
+def _primary_document_name(value: str) -> str:
+    """Return a payload-supplied document name that is safe to put in a URL path.
+
+    The name is interpolated into the filing's archive URL, so anything that
+    could escape that directory or alter the request path is rejected instead of
+    trusted. Only plain EDGAR file names are accepted.
+    """
+
+    name = value.strip()
+    if not name:
+        raise EdgarNormalizationError("latest annual report has no primary document")
+    if ".." in name or not _PRIMARY_DOCUMENT_NAME.fullmatch(name):
+        raise EdgarNormalizationError(
+            "primary document must be a plain EDGAR file name"
+        )
+    return name
 
 
 def _document_url(cik: str, accession_number: str, primary_document: str) -> str:
