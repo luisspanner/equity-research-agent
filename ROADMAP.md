@@ -28,12 +28,14 @@ Completed after V0:
   Synthesis, and the Markdown report
 - [x] Focused duplication cleanup for shared Groq transport/response mechanics
   and exact source-reference merging
-- [x] EDGAR annual-report discovery, metadata only, not yet used by the
-  research workflow
+- [x] EDGAR annual-report discovery, metadata only
+- [x] EDGAR filing-document retrieval as sourced, untrusted text, held in
+  memory only
 
-No implementation slice is currently active. Phase 2 has begun with filing
-discovery; the next step is to select and review one bounded filing-retrieval
-slice. The roadmap does not select or begin that work automatically.
+Neither filing capability is used by the research workflow yet. No
+implementation slice is currently active. The next step is to select and review
+one bounded filing-text-extraction slice. The roadmap does not select or begin
+that work automatically.
 
 Live CLI runs are reserved for bug investigation or after several new features
 have accumulated. Unit, integration, lint, and type checks are the default
@@ -109,13 +111,21 @@ domain and provenance contract together with one metadata-only discovery
 adapter, deliberately excluding document retrieval, parsing, search, and
 analyst integration.
 
-### Next selection: filing-document retrieval
+### Completed: filing-document retrieval
 
-Retrieve the primary document identified by an existing `FilingReference` and
-represent it as sourced, explicitly untrusted raw text. Keep retrieval separate
-from parsing: knowing that a document was fetched, from where, and in what form
-is a testable capability on its own. Do not combine retrieval, parsing, search,
-and analyst integration in the same slice.
+The second slice fetched the primary document identified by a
+`FilingReference` and represented it as sourced, explicitly untrusted text held
+in memory. It established the guards appropriate to the project's first hostile
+input — URL, size, content type, and decoding — while leaving parsing,
+caching, and persistence out.
+
+### Next selection: filing-text extraction
+
+Convert one retrieved HTML document into plain text that later slices can
+section and chunk. Extraction is a deterministic transformation and should be
+testable as one: given recorded filing HTML, produce known text. Keep it
+separate from section detection, chunking, and search, and do not put filing
+text in front of a model in the same slice.
 
 Introduce dedicated Market, Moat, Growth, or Risk Analysts only when each has
 a distinct evidence boundary, responsibility, and evaluation criterion—not
