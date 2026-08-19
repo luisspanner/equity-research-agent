@@ -119,8 +119,10 @@ Abstractions and frameworks should only be introduced when they solve an actual 
 ✅ **V0 walking skeleton complete**
 
 The CLI retrieves Alpha Vantage company and annual financial data, calculates
-deterministic metrics, runs the Business and Bear Analysts plus final Synthesis
-through Groq, and prints a sourced Markdown research report.
+deterministic metrics, runs the Business, Bear, and Financial Quality Analysts
+plus final Synthesis through Groq, and prints a sourced Markdown research
+report. Financial-risk and Financial Quality findings retain source provenance
+through the workflow.
 
 ## Running V0
 
@@ -154,7 +156,6 @@ Possible later extensions include:
 - Reverse DCF
 - Bear / Base / Bull scenarios
 - Historical valuation analysis
-- Source provenance and citations
 - MCP tools
 - Research database
 - Web interface
