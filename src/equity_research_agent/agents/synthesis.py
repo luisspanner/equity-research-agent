@@ -6,7 +6,7 @@ from equity_research_agent.models.bear_analysis import BearAnalysis
 from equity_research_agent.models.business_analysis import BusinessAnalysis
 from equity_research_agent.models.company import CompanyProfile
 from equity_research_agent.models.financial_quality import FinancialQualityAnalysis
-from equity_research_agent.models.provenance import SourceReference
+from equity_research_agent.models.provenance import merge_source_references
 
 
 def build_research_synthesis_prompt(
@@ -17,7 +17,7 @@ def build_research_synthesis_prompt(
 ) -> str:
     """Build a deterministic synthesis prompt from sourced qualitative inputs."""
 
-    sources = _merge_sources(
+    sources = merge_source_references(
         business_analysis.sources,
         bear_analysis.sources,
         financial_quality_analysis.sources,
@@ -66,21 +66,3 @@ Return JSON with these fields:
 
 Research context:
 """ + json.dumps(context, indent=2, sort_keys=True)
-
-
-def _merge_sources(
-    business_sources: tuple[SourceReference, ...],
-    bear_sources: tuple[SourceReference, ...],
-    financial_quality_sources: tuple[SourceReference, ...],
-) -> tuple[SourceReference, ...]:
-    """Combine sources while rejecting conflicting references with one source ID."""
-
-    sources_by_id: dict[str, SourceReference] = {}
-    for source in (*business_sources, *bear_sources, *financial_quality_sources):
-        existing_source = sources_by_id.get(source.source_id)
-        if existing_source is not None and existing_source != source:
-            raise ValueError(
-                f"source ID {source.source_id} refers to conflicting source references"
-            )
-        sources_by_id[source.source_id] = source
-    return tuple(sources_by_id.values())

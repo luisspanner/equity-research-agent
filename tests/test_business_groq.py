@@ -202,6 +202,34 @@ def test_http_error_preserves_a_credential_safe_provider_message(
     assert "api_key=<redacted>" in str(error.value)
 
 
+def test_http_error_redacts_authorization_scheme_and_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    http_error = HTTPError(
+        "https://example.test",
+        401,
+        "unauthorized",
+        Message(),
+        BytesIO(
+            b'{"error": {"message": "Invalid authorization: Bearer sk-secret"}}'
+        ),
+    )
+
+    def failing_urlopen(request: Request, *, timeout: float) -> FakeResponse:
+        raise http_error
+
+    monkeypatch.setattr(
+        "equity_research_agent.agents.business_groq.urlopen", failing_urlopen
+    )
+
+    with pytest.raises(GroqBusinessAnalystError) as error:
+        GroqBusinessAnalyst("test-key").analyze(make_profile())
+
+    assert str(error.value) == "Groq HTTP 401: Invalid authorization=<redacted>"
+    assert "Bearer" not in str(error.value)
+    assert "sk-secret" not in str(error.value)
+
+
 @pytest.mark.parametrize(
     ("body", "message"),
     [

@@ -1,6 +1,6 @@
 """Preparation of provenance-preserving deterministic financial-risk inputs."""
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from decimal import Decimal
 from typing import Literal
 
@@ -11,7 +11,10 @@ from equity_research_agent.models.financial_risk import (
 )
 from equity_research_agent.models.financials import AnnualFinancials, MarketSnapshot
 from equity_research_agent.models.metrics import FinancialMetrics
-from equity_research_agent.models.provenance import SourceReference
+from equity_research_agent.models.provenance import (
+    SourceReference,
+    merge_source_references,
+)
 
 
 def build_financial_risk_context(
@@ -150,7 +153,7 @@ def build_financial_risk_context(
     if not result:
         raise ValueError("no source-traceable financial metrics are available")
 
-    sources = _deduplicate_sources(
+    sources = merge_source_references(
         source for metric in result for source in _sources_for_ids(
             metric.source_ids,
             financials,
@@ -180,7 +183,7 @@ def _append_metric(
             value=value,
             unit=unit,
             source_ids=tuple(
-                source.source_id for source in _deduplicate_sources(sources)
+                source.source_id for source in merge_source_references(sources)
             ),
         )
     )
@@ -222,22 +225,3 @@ def _sources_for_ids(
         for source in available_sources
         if source.source_id == source_id
     )
-
-
-def _deduplicate_sources(
-    sources: Iterable[SourceReference],
-) -> tuple[SourceReference, ...]:
-    """Deduplicate source references by ID while preserving encounter order."""
-
-    result: list[SourceReference] = []
-    sources_by_id: dict[str, SourceReference] = {}
-    for source in sources:
-        existing_source = sources_by_id.get(source.source_id)
-        if existing_source is not None and existing_source != source:
-            raise ValueError(
-                f"source ID {source.source_id} refers to conflicting source references"
-            )
-        if existing_source is None:
-            result.append(source)
-            sources_by_id[source.source_id] = source
-    return tuple(result)

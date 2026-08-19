@@ -1,5 +1,6 @@
 """Models for recording the origin of normalized data."""
 
+from collections.abc import Iterable
 from datetime import date, datetime
 from urllib.parse import parse_qsl
 
@@ -42,3 +43,21 @@ class SourceReference(DomainModel):
             raise ValueError("retrieved_at must include a timezone")
 
         return self
+
+
+def merge_source_references(
+    *source_groups: Iterable[SourceReference],
+) -> tuple[SourceReference, ...]:
+    """Combine sources in encounter order and reject conflicting source IDs."""
+
+    sources_by_id: dict[str, SourceReference] = {}
+    for source_group in source_groups:
+        for source in source_group:
+            existing_source = sources_by_id.get(source.source_id)
+            if existing_source is not None and existing_source != source:
+                raise ValueError(
+                    f"source ID {source.source_id} refers to conflicting "
+                    "source references"
+                )
+            sources_by_id[source.source_id] = source
+    return tuple(sources_by_id.values())

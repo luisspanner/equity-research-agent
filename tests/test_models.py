@@ -9,7 +9,10 @@ from pydantic import ValidationError
 
 from equity_research_agent.models.common import DomainModel
 from equity_research_agent.models.company import CompanyProfile, SecurityIdentity
-from equity_research_agent.models.provenance import SourceReference
+from equity_research_agent.models.provenance import (
+    SourceReference,
+    merge_source_references,
+)
 
 
 def make_source(**overrides: object) -> SourceReference:
@@ -88,6 +91,38 @@ def test_source_reference_rejects_invalid_source_data(
 ) -> None:
     with pytest.raises(ValidationError):
         make_source(**overrides)
+
+
+def test_merge_source_references_preserves_first_encounter_order() -> None:
+    first = make_source(source_id="first", url="https://example.com/first")
+    second = make_source(source_id="second", url="https://example.com/second")
+    third = make_source(source_id="third", url="https://example.com/third")
+
+    merged = merge_source_references((first, second), (third,))
+
+    assert merged == (first, second, third)
+
+
+def test_merge_source_references_deduplicates_equal_references() -> None:
+    source = make_source()
+
+    assert merge_source_references((source,), (source,)) == (source,)
+
+
+def test_merge_source_references_rejects_conflicting_source_ids() -> None:
+    source = make_source()
+    conflicting_source = make_source(
+        provider="other_provider",
+        url="https://example.com/conflicting",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "source ID ASML-overview refers to conflicting source references"
+        ),
+    ):
+        merge_source_references((source,), (conflicting_source,))
 
 
 def test_security_identity_preserves_asml_adr_currency_distinction() -> None:
