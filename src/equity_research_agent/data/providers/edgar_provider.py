@@ -16,7 +16,9 @@ from equity_research_agent.data.providers.edgar import (
 from equity_research_agent.models.filings import FilingReference, RetrievedFiling
 from equity_research_agent.models.provenance import SourceReference
 
-DEFAULT_MAX_DOCUMENT_BYTES = 25 * 1024 * 1024
+# ASML's 2025 Form 20-F is roughly 24 MB of inline XBRL, so the limit exists to
+# bound a runaway response rather than to reject a large annual report.
+DEFAULT_MAX_DOCUMENT_BYTES = 64 * 1024 * 1024
 
 
 class EdgarProviderError(RuntimeError):

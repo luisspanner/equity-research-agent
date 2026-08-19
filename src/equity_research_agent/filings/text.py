@@ -14,6 +14,8 @@ _NON_CONTENT_TAGS = ("head", "script", "style", "ix:header", "ix:hidden")
 # formatting rather than structure.
 _BLOCK_SEPARATOR = "\x00"
 
+_CELL_TAGS = ("td", "th")
+
 _BLOCK_TAGS = (
     "p",
     "div",
@@ -64,10 +66,15 @@ def extract_filing_text(retrieved: RetrievedFiling) -> FilingText:
 def _extract_html_text(document: str) -> str:
     """Convert filing HTML into text with one line per block-level element.
 
-    Strings are joined with a space so that prose split across inline tags does
-    not fuse into single words. Inline XBRL wraps individual reported values, so
-    the tradeoff is an occasional extra space beside a number rather than
-    unreadable text.
+    Text nodes are joined without an added separator, matching how a browser
+    renders inline content: adjacent inline elements with no whitespace between
+    them are one word, and filers put the spacing they mean into the text
+    itself. Measured against ASML's 2025 Form 20-F, joining with a space instead
+    produced about a thousand spurious spaces before punctuation and split
+    hundreds of words, while preventing no fusion at all.
+
+    Table cells are the exception. A bare cell boundary carries no source
+    whitespace, so cells emit a space and rows end a line.
     """
 
     soup = BeautifulSoup(document.replace(_BLOCK_SEPARATOR, ""), "html.parser")
@@ -77,10 +84,12 @@ def _extract_html_text(document: str) -> str:
 
     for line_break in soup.find_all("br"):
         line_break.replace_with(_BLOCK_SEPARATOR)
+    for cell in soup.find_all(_CELL_TAGS):
+        cell.append(" ")
     for block in soup.find_all(_BLOCK_TAGS):
         block.append(_BLOCK_SEPARATOR)
 
-    return _normalize_blocks(soup.get_text(separator=" "))
+    return _normalize_blocks(soup.get_text(separator=""))
 
 
 def _remove(tags: Iterable[Tag]) -> None:
