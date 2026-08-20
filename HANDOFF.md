@@ -424,7 +424,7 @@ the code as it evolves.
 
 Freshly verified locally on 2026-08-20. Filing sectioning is committed at
 `f7ed519`; the Disclosed Risk Analyst is committed at `6284e94`; ticker-to-CIK
-resolution above it is uncommitted at time of writing:
+resolution is committed at `4919f56`:
 
 - `uv run pytest`: 520 passed
 - `uv run ruff check`: passed
@@ -464,8 +464,10 @@ bug investigation or for validating several accumulated features.
   block raises rather than returning an older filing.
 - Filing discovery takes a CIK. Ticker-to-CIK resolution now exists
   (`EdgarFilingProvider.resolve_cik`), but nothing calls it yet:
-  `SecurityIdentity.cik` is still never populated, and nothing in the
-  research workflow calls `EdgarFilingProvider` at all.
+  Alpha Vantage populates `SecurityIdentity.cik` when its overview supplies
+  one, but the workflow neither uses that value for EDGAR nor falls back to
+  SEC resolution when it is missing. Nothing in the research workflow calls
+  `EdgarFilingProvider` at all.
 - `resolve_cik` fetches and parses the full ~800 KB `company_tickers.json` on
   every call; there is no caching across calls within or between runs.
 - `resolve_cik` does exact, case-insensitive matching only. A ticker not
@@ -482,8 +484,8 @@ bug investigation or for validating several accumulated features.
   no RAG capability exists.
 - The Disclosed Risk Analyst reads exactly one section per call. There is no
   batch entry point for many sections, and it is not wired into `run_research`
-  or the CLI — both blocked on ticker-to-CIK resolution, not on the analyst
-  itself.
+  or the CLI. Ticker-to-CIK resolution exists, but the integration's CIK
+  policy and failure behaviour are still unselected.
 - `filing_section_source`'s `captured_on` reuses `filing.filed_on`, not an
   actual retrieval timestamp, because `FilingSection` carries no provenance of
   its own to draw one from. Close enough for a filing (it does not change
@@ -572,7 +574,7 @@ bug investigation or for validating several accumulated features.
 
 ## Next Expected Steps
 
-1. Select and review one bounded filing-sectioning slice.
+1. Select and review one bounded filing-integration slice.
 2. Inspect only the filing models, extraction, and tests relevant to it.
 3. Propose the implementation approach and affected files under `AGENTS.md`.
 4. Wait for approval if the request is planning or review-first, then implement
