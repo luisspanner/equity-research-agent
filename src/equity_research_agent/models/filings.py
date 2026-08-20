@@ -78,3 +78,28 @@ class FilingText(DomainModel):
     filing: FilingReference
     untrusted_text: DocumentText
     sources: tuple[SourceReference, ...] = Field(min_length=1)
+
+
+class FilingSection(DomainModel):
+    """One labelled span of a filing, bounded by locations its own sectioning
+    index cites.
+
+    More than one label can point to the same anchor, so a filing's sections
+    are not guaranteed to be disjoint: two sections can carry identical text.
+    """
+
+    label: NonEmptyString
+    anchor_id: NonEmptyString
+    text: DocumentText
+
+
+class SectionedFiling(DomainModel):
+    """One filing divided into labelled, possibly overlapping sections.
+
+    Sectioning is a pure transformation of an already-retrieved document: it
+    adds no source of its own, matching the precedent set by ``FilingText``.
+    """
+
+    filing: FilingReference
+    sections: tuple[FilingSection, ...] = Field(min_length=1)
+    sources: tuple[SourceReference, ...] = Field(min_length=1)

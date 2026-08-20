@@ -9,8 +9,10 @@ from pydantic import HttpUrl, ValidationError
 from equity_research_agent.models.filings import (
     ANNUAL_REPORT_FORM_TYPES,
     FilingReference,
+    FilingSection,
     FilingText,
     RetrievedFiling,
+    SectionedFiling,
 )
 from equity_research_agent.models.provenance import SourceReference
 
@@ -83,6 +85,29 @@ def make_filing_text(**overrides: Any) -> FilingText:
         "sources": (make_document_source(),),
     }
     return FilingText(**{**fields, **overrides})
+
+
+def make_filing_section(**overrides: Any) -> FilingSection:
+    """Create a valid filing section with optional field overrides."""
+
+    fields: dict[str, Any] = {
+        "label": "Item 3.D. Risk Factors",
+        "anchor_id": "i1edf02a2dc3144cf83a1843d2038ab4e_214",
+        "text": "We derive a substantial portion of our net sales from a few"
+        " customers.",
+    }
+    return FilingSection(**{**fields, **overrides})
+
+
+def make_sectioned_filing(**overrides: Any) -> SectionedFiling:
+    """Create a valid sectioned filing with optional field overrides."""
+
+    fields: dict[str, Any] = {
+        "filing": make_filing(),
+        "sections": (make_filing_section(),),
+        "sources": (make_document_source(),),
+    }
+    return SectionedFiling(**{**fields, **overrides})
 
 
 def test_annual_report_form_types_are_derived_from_the_literal() -> None:
@@ -231,3 +256,71 @@ def test_filing_text_requires_at_least_one_source() -> None:
 def test_filing_text_forbids_unknown_fields() -> None:
     with pytest.raises(ValidationError):
         make_filing_text(summary="ASML depends on a few customers")
+
+
+def test_filing_section_retains_its_label_anchor_and_text() -> None:
+    section = make_filing_section()
+
+    assert section.label == "Item 3.D. Risk Factors"
+    assert section.anchor_id == "i1edf02a2dc3144cf83a1843d2038ab4e_214"
+    assert "substantial portion" in section.text
+
+
+def test_filing_section_is_immutable() -> None:
+    section = make_filing_section()
+
+    with pytest.raises(ValidationError):
+        section.text = "replaced"  # type: ignore[misc]
+
+
+@pytest.mark.parametrize("field", ["label", "anchor_id", "text"])
+def test_filing_section_rejects_empty_fields(field: str) -> None:
+    with pytest.raises(ValidationError):
+        make_filing_section(**{field: ""})
+
+
+def test_filing_section_forbids_unknown_fields() -> None:
+    with pytest.raises(ValidationError):
+        make_filing_section(caption="Risk Factors")
+
+
+def test_sectioned_filing_retains_its_sections_and_provenance() -> None:
+    sectioned = make_sectioned_filing()
+
+    assert sectioned.filing.accession_number == "0000937966-26-000008"
+    assert sectioned.sections[0].label == "Item 3.D. Risk Factors"
+    assert sectioned.sources[0].source_type == "annual_report_document"
+
+
+def test_sectioned_filing_allows_two_sections_that_share_an_anchor() -> None:
+    shared = make_filing_section(label="Item 4.A. History and Development")
+    duplicate = make_filing_section(label="Item 4.B. Business Overview")
+
+    sectioned = make_sectioned_filing(sections=(shared, duplicate))
+
+    assert {section.anchor_id for section in sectioned.sections} == {
+        "i1edf02a2dc3144cf83a1843d2038ab4e_214"
+    }
+    assert len(sectioned.sections) == 2
+
+
+def test_sectioned_filing_is_immutable() -> None:
+    sectioned = make_sectioned_filing()
+
+    with pytest.raises(ValidationError):
+        sectioned.sections = ()  # type: ignore[misc]
+
+
+def test_sectioned_filing_requires_at_least_one_section() -> None:
+    with pytest.raises(ValidationError):
+        make_sectioned_filing(sections=())
+
+
+def test_sectioned_filing_requires_at_least_one_source() -> None:
+    with pytest.raises(ValidationError):
+        make_sectioned_filing(sources=())
+
+
+def test_sectioned_filing_forbids_unknown_fields() -> None:
+    with pytest.raises(ValidationError):
+        make_sectioned_filing(summary="six sections found")

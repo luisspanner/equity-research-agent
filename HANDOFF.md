@@ -16,9 +16,10 @@ Synthesis, and reporting, and its findings are validated against the exact
 deterministic metrics and source IDs they cite.
 
 Separately from that pipeline, the project can discover an issuer's most recent
-annual report on SEC EDGAR, retrieve its primary document as untrusted text, and
-extract that document into readable plain text. None of these capabilities is
-wired into the research workflow.
+annual report on SEC EDGAR, retrieve its primary document as untrusted text,
+extract that document into readable plain text, and divide it into labelled,
+possibly overlapping sections along the filer's own linking index. None of
+these capabilities is wired into the research workflow.
 
 ## Completed Filing-Ingestion Slices
 
@@ -72,6 +73,31 @@ against the real filing.
 - `beautifulsoup4` is the only dependency added, used with the standard-library
   parser backend.
 
+Filing sectioning, along the filer's own index — validated against ASML's
+20-F and NVIDIA's 10-K.
+
+- `FilingSection` (label, anchor id, text) and `SectionedFiling` (filing,
+  sections, sources) are new domain models. `SectionedFiling.sections` allows
+  more than one section per anchor, since the mapping measured on ASML's
+  filing is many-to-many.
+- `extract_filing_sections` in a new `filings/sections.py` consumes
+  `RetrievedFiling` directly, not `FilingText`: every boundary signal
+  extraction discards is exactly what sectioning needs.
+- The index is any `<tr>` linking to an in-document anchor, not a
+  filer-specific search. A row's label is built from the row's own text
+  (page numbers excluded), because ASML links only its page-number cell while
+  NVIDIA links every cell in a row — using only the linked cell's text would
+  have lost ASML's caption.
+- A section's span runs from its anchor's raw-text offset to whichever cited
+  anchor's offset comes next; an id present in the document but never cited
+  by the index does not bound a section, only cited targets do.
+- Adds no source, matching the precedent `FilingText` set: sectioning is a
+  transformation of an already-retrieved document, not a new retrieval.
+- Tested with the established dual-fixture convention: synthetic cases isolate
+  overlap, dangling targets, multi-target rows, and non-table links; the two
+  recorded real fixtures validate the mechanism against real structure,
+  including the exact label wording each filer's own markup produces.
+
 ## Measured Filing-Structure Findings
 
 Carry these forward. They were measured against ASML's 2025 Form 20-F
@@ -98,23 +124,155 @@ constrain the design of later slices.
   38,000 lines. There were no zero-width spaces or byte-order marks;
   normalizing `\xa0` was sufficient.
 
+## Measured Section-Boundary Findings
+
+A second live fetch on 2026-08-20 answered the open section-boundary question.
+Same filing (accession `0001628280-26-011378`, filed 2026-02-25, 24,864,615
+bytes, extracting to 1,331,662 characters across 37,760 lines, reproducing the
+scale figures above exactly).
+
+- **The filer supplies the sectioning scheme, and it is legally operative.**
+  "Appendix – Reference table 20-F" maps each SEC 20-F item to a named location
+  in the document, a page number, and a link. The filing then states that only
+  the information referenced in that table, the table itself, the
+  forward-looking-statements section, and the exhibits "shall be deemed to be
+  filed with the Securities and Exchange Commission". The table is not
+  navigation furniture; it defines which parts of a 350-page annual report are
+  the 20-F.
+- **The table is machine-readable.** Its columns are `Item`, `Form 20-F
+  caption`, `Location in this document`, `Page`. It sits in the last 1% of the
+  source (offsets 23.96–24.19 MB), repeats its header across four pages, and
+  holds 117 rows, 59 of which carry an in-document link. Rows take six shapes:
+  part divider, item whose location is `Not applicable`, item header whose
+  sub-items follow, sub-item with a location, continuation row adding a further
+  location to the sub-item above it, and running page furniture that is not
+  data.
+- **Anchors are empty positioned marker divs.** All 50 link targets are
+  `<div id="…" style="position:absolute;top:…pt"></div>` carrying zero text.
+  Section content lives in the following siblings, never inside the marker.
+  Every target resolves; none dangle.
+- **The item-to-location mapping is many-to-many.** Item 4.B cites six
+  locations, and `At a glance` is cited by both 4.A and 4.B. Sections overlap,
+  so a model that partitions the document into disjoint sections is wrong for
+  this filing.
+- **Anchors do not partition the document.** In document order their gaps run
+  from 93 to 9,574,081 characters, median 234,858. The largest gap is the
+  Sustainability statements block, which the reference table deliberately does
+  not cite and which is therefore outside the 20-F.
+- **What follows a marker varies in shape.** The `At a glance` marker is
+  followed by five flat sibling blocks; the risk-factors marker is followed by
+  one 49,265-character container. Reading forward in document order handles
+  both; counting sibling nodes does not.
+- **`Item` headings are still absent from the body, but the table names every
+  item.** In extracted text `\bItem\b` occurs 13 times and only seven lines
+  begin with `Item `. Six of those are AGM agenda items ("Item 1 Discussion of
+  the Management Report…") and the seventh is the cover-page checkbox line
+  "Item 17 ☐ Item 18 ☐". `Item 3.D` and `Item 4.B` still match zero times. A
+  sectioner keying on `^Item \d` would match nothing but false positives. The
+  reference table names items as bare cell values — `3`, `4`, `4A`, `16J` — not
+  as `Item 3.D` strings.
+- **No heading tags and no paragraph tags exist.** 78,027 `div`, 62,010 `span`,
+  1,590 `table`, 0 `p`, 0 `h1`–`h6`. The `p` entry in the extractor's
+  `_BLOCK_TAGS` never fires on this filer, and heading level cannot come from
+  tag names. The string "Table of Contents" appears nowhere.
+- **Extraction currently discards every boundary signal.** `FilingText` retains
+  no element ids, no `href`s, and no anchor strings, and all 50 marker elements
+  render to empty text. Sectioning cannot run on `FilingText` alone: it needs
+  the HTML, or extraction must carry positions forward.
+- **Loose ends.** Two anchor id namespaces appear (`i1edf02a2…` and
+  `i99abb9ae…`), one target has an anomalous long suffix
+  (`…_91809220939599`), and one marker lands on a running page header rather
+  than the note body it names.
+
+## Measured Second-Filer Findings (NVIDIA 10-K)
+
+A live fetch on 2026-08-20 pulled NVIDIA's Form 10-K (accession
+`0001045810-26-000021`, filed 2026-02-25, period end 2026-01-25, 1,967,816
+bytes — a domestic 10-K, not a "10-F"; that form does not exist) to test
+whether the ASML findings above are filer-specific or general. They are a mix
+of both.
+
+- **The low-level DOM mechanism is identical.** Zero `<h1>`–`<h6>` and zero
+  `<p>` tags, same as ASML (0 of each, across 1,917 `div` and 4,230 `span`).
+  Anchor ids follow the same `i<32-hex>_<n>` pattern (e.g.
+  `i82ea215a7c1f4862b6518f1348ddc832_13`), and every anchor is again an empty
+  positioned `<div id="…"></div>` with zero own text, real content in
+  following siblings — confirmed by running the project's actual
+  `_extract_html_text` on marker elements and their siblings, not by
+  inspection alone. This is very likely a shared filing-agent artifact (the
+  same iXBRL rendering tool, commonly Workiva), not something specific to
+  ASML or to Form 20-F.
+- **The sectioning semantics are not identical.** NVIDIA supplies a literal,
+  conventional Table of Contents — the string "Table of Contents" occurs 81
+  times, and the real TOC table holds 237 links resolving to 38 distinct
+  targets. Unlike ASML's reference table, every target is cited under
+  exactly one `Item` label: zero overlap, a genuine one-to-one, sequential
+  partition. The three apparent "links per target" are the item-number,
+  caption, and page-number cells of one row, not distinct citations.
+- **`Item` headings exist as real prose here, but are not uniquely
+  locatable by text alone.** `Item 1A. Risk Factors` appears exactly once as
+  a section heading (immediately after its marker) but six times overall in
+  the 339,478-character extracted text: the other five are the filing's own
+  inline cross-references ("Refer to 'Item 1A. Risk Factors' for a
+  discussion…"). A sectioner keying on heading text without position
+  information would need to disambiguate a heading from a citation of that
+  heading — the same underlying problem as ASML, reached by a different
+  route. It reinforces, rather than weakens, the finding that `FilingText`
+  alone cannot carry sectioning.
+- **Internal links have one source.** All 237 `<a href="#…">` anywhere in
+  the document belong to the TOC; body prose never links to a section, it
+  only names it. ASML's document had internal links inside the reference
+  table only as well, but ASML's body separately used many `Item` names
+  without any link — NVIDIA's cross-references are prose-only mentions, not
+  a second, competing link structure.
+- **Scale differs by an order of magnitude.** 1.97 MB of source HTML yields
+  339,478 characters across 2,094 lines — a normal-sized 10-K, not inflated
+  by anything resembling ASML's Sustainability appendix. `normalize_latest_annual_report`
+  and `EdgarFilingProvider` needed no changes to retrieve or decode it: `10-K`
+  was already a first-class `AnnualReportFormType`, and extraction is
+  form-agnostic.
+- **What is still unverified.** Two filings is not enough to know whether the
+  marker-div mechanism is filing-agent-universal or a coincidence of two
+  large filers happening to use the same agent. Other common SEC filing
+  agents (e.g. Donnelley Financial Solutions, Toppan Merrill) may render
+  real semantic heading tags instead. Nothing here should be read as "all
+  10-Ks look like this."
+
 ## Current / Next Slice
 
-No implementation slice is currently active.
+No implementation slice is currently active. Filing sectioning, the slice
+described in the previous version of this document, is now implemented; see
+"Completed Filing-Ingestion Slices" above it in reading order (or search for
+"filing sectioning, along the filer's own index").
 
-The next step is filing sectioning: divide one `FilingText` into labelled
-sections that later chunking and retrieval can target. Because item headings do
-not exist in this filer's document, the first design question is what a section
-boundary actually is here — a heading style, a cross-reference table, a table of
-contents, or explicit user-supplied anchors. Decide that before implementing.
+The mechanism: any `<tr>` that links to an in-document anchor is treated as
+one index row. Each row's label comes from the row's own non-numeric cell
+text (not only the linked cell, since ASML links only its page-number cell
+while NVIDIA links every cell in a row), and a section runs from its anchor
+to whichever cited anchor comes next in raw-document order. A target cited by
+more than one row yields more than one section carrying identical text, so
+sections are a set of possibly overlapping spans rather than a partition —
+resolving open question 2 below. `extract_filing_sections` consumes
+`RetrievedFiling.untrusted_text` (HTML) directly rather than `FilingText`,
+resolving open question 1 below; `FilingText`/extraction were left untouched.
 
-### Explicitly Out of Scope
+What was deliberately not attempted: detecting or ranking which container in
+a document is "the" sectioning index by link density. The implementation
+instead treats every linked table row as a candidate, independent of where in
+the document it sits. This is simpler and matches both filers' measured
+structure (every internal link belongs to the index, nothing competing), but
+a filing with an unrelated internal link inside a `<tr>` — a footnote
+cross-reference table, say — would be misread as an index row. Not observed
+in either filer sampled; flagged rather than guarded against.
+
+### Explicitly Out of Scope (carried out of this slice)
 
 - chunking, embeddings, retrieval, RAG, pgvector, PostgreSQL, FastAPI, Docker;
 - summarizing or interpreting filing text;
-- exposing filing text to any analyst prompt;
-- caching or persisting retrieved documents;
+- exposing filing text or sections to any analyst prompt;
+- caching or persisting retrieved documents or sections;
 - ticker-to-CIK resolution, a second filing source, or provider fallback;
+- generalizing the mechanism to a third, unexamined filing agent;
 - valuation, persistence, web UI, or other later roadmap phases;
 - unrelated application refactoring.
 
@@ -130,14 +288,30 @@ contents, or explicit user-supplied anchors. Decide that before implementing.
 - `src/equity_research_agent/data/providers/edgar_provider.py` — EDGAR transport
   and document retrieval
 - `src/equity_research_agent/filings/text.py` — HTML-to-text extraction
+- `src/equity_research_agent/filings/sections.py` — filing sectioning along
+  the filer's own linking index
 - `src/equity_research_agent/models/provenance.py` — source-reference model and
   merge behavior
 - `src/equity_research_agent/__init__.py` — current workflow composition
 - `tests/` — executable behavior and established testing conventions
+- `tests/test_filing_sectioning.py` — synthetic and real-fixture tests for
+  `extract_filing_sections`
 - `tests/fixtures/providers/sec_edgar/asml/asml_20f_excerpt.htm` — trimmed
   excerpt of the real filing; the header comment records its provenance
 - `tests/fixtures/providers/sec_edgar/asml/inline_xbrl_excerpt.htm` — synthetic
   fixture that isolates individual extraction rules
+- `tests/fixtures/providers/sec_edgar/asml/reference_table_excerpt.htm` —
+  trimmed excerpt of the filer's 20-F reference table, three of the empty
+  marker divs it links to, and the content following each; used by
+  `test_filing_sectioning.py` to validate against real structure
+- `tests/fixtures/providers/sec_edgar/asml/annual_report.htm` — synthetic
+  document-retrieval fixture. Note that its `Item 3.D. Risk Factors` heading is
+  a structure the real filing does not contain; it exercises retrieval, and
+  sectioning must not be validated against it
+- `tests/fixtures/providers/sec_edgar/nvda/toc_excerpt.htm` — trimmed excerpt
+  of NVIDIA's real 10-K Table of Contents, two of the empty marker divs it
+  links to, and the content following each; used by
+  `test_filing_sectioning.py` as a second-filer comparison
 
 ## Important Architectural Decisions
 
@@ -174,16 +348,26 @@ contents, or explicit user-supplied anchors. Decide that before implementing.
 
 ## Verification Status
 
-Freshly verified locally on 2026-08-20 against commit `f1acadf`:
+Freshly verified locally on 2026-08-20. Uncommitted at time of writing —
+working tree on top of commit `9e5140d`, includes the filing-sectioning slice:
 
-- `uv run pytest`: 453 passed
+- `uv run pytest`: 483 passed
 - `uv run ruff check`: passed
-- `uv run mypy`: passed for configured `src`
+- `uv run mypy`: passed for configured `src` (42 files)
 - `git diff --check`: passed
 
 Automated checks make no live provider or model calls; EDGAR behavior is
 verified against recorded submissions and document fixtures. A fresh agent
 should rerun checks relevant to any new change.
+
+The section-boundary findings above came from one live EDGAR fetch on
+2026-08-20 (two requests, no API key, no quota consumed), made through
+`EdgarFilingProvider` with a declared contact user agent. The measurements are
+reproducible from `reference_table_excerpt.htm` without refetching.
+
+The second-filer findings came from one further live EDGAR fetch the same
+day (two more requests, same provider, same declared contact user agent) of
+NVIDIA's 10-K. Reproducible from `toc_excerpt.htm` without refetching.
 
 Live runs differ in cost and should be treated differently. EDGAR needs no API
 key and has no daily quota, so a live filing fetch costs two requests and is
@@ -206,13 +390,33 @@ bug investigation or for validating several accumulated features.
   second provider still requires explicit adapters.
 - Retrieved documents are held in memory only. Nothing is cached or persisted,
   so a second run refetches the same immutable filing.
-- Filing documents are extracted to plain text but never sectioned or searched,
-  and no RAG capability exists.
+- Filing sections are produced but never chunked, embedded, or searched, and
+  no RAG capability exists.
+- Extraction discards element ids, links, and document positions, so
+  `FilingText` alone cannot locate a section boundary. Measured, not assumed;
+  it is why sectioning consumes `RetrievedFiling` HTML directly instead.
+- Sectioning only recognizes table-row-based indices, and only rows that link
+  to an anchor. A filer whose sectioning device is not a table, or an
+  unrelated internal link inside an index-shaped `<tr>` (a footnote
+  cross-reference, say), would be misread. Not observed in either filer
+  sampled.
+- A row's label drops any cell whose text is purely digits, on the
+  assumption that a bare number is a page reference. A filer whose item
+  number itself renders as a bare digit (not observed in either filer
+  sampled) would lose that number from the label.
+- Sectioning treats every internal link in a linked `<tr>` as belonging to
+  the index; it does not try to detect or rank which container in a document
+  is "the" index by link density. Matches both filers measured, where no
+  other internal links compete, but is unverified against a filer with a
+  second, unrelated internal-link structure.
 - Extraction concatenates adjacent inline elements that carry no source
   whitespace, so absolutely-positioned columns can fuse. Accepted deliberately;
   the alternative introduced far more damage elsewhere.
-- Extraction is validated against one filer's markup. Another filer's HTML may
-  need different handling, and the cheap way to find out is one live fetch.
+- Extraction is validated against two filers' markup (ASML's 20-F, NVIDIA's
+  10-K), both structurally identical at the DOM level (no heading or
+  paragraph tags, same anchor-id scheme). A filer using a different filing
+  agent may need different handling, and the cheap way to find out is one
+  live fetch.
 - Document retrieval rejects an undeclared or non-text `Content-Type` and any
   text it cannot decode with the declared character set. Redirects are followed
   without re-checking the final URL against the archive-prefix guard.
@@ -232,12 +436,30 @@ bug investigation or for validating several accumulated features.
   when chunks and embeddings exist to query, not to raw document storage.
 - Where does ticker-to-CIK resolution belong once the workflow needs filings:
   the financial-data provider, a dedicated resolver, or the caller?
-- What marks a section boundary in a filing that has no `Item` headings? Options
-  include heading styles, the filer's cross-reference table, the table of
-  contents, or explicit caller-supplied anchors. This decides the next slice.
-- Should sectioning be filer-specific? One document has been examined. A second
-  filer, ideally a 10-K rather than a 20-F, would show which behavior is general
-  and which is Workiva-specific.
+- ~~What marks a section boundary in a filing that has no `Item` headings?~~
+  Measured: the filer's cross-reference table, which is also the filer's own
+  statement of what is legally part of the 20-F. The competing candidates are
+  ruled out for this document — no heading tags, no table of contents, no body
+  `Item` headings.
+- ~~Should sectioning consume HTML, or should extraction be extended to carry
+  positions into `FilingText`?~~ Decided and implemented: `extract_filing_sections`
+  consumes `RetrievedFiling.untrusted_text` directly. `FilingText`/extraction
+  were left unchanged, so nothing that only needs plain text pays for
+  sectioning's HTML parse.
+- ~~How should overlapping sections be modelled?~~ Decided and implemented:
+  `SectionedFiling.sections` is a tuple of `FilingSection`, and more than one
+  section may share an `anchor_id` with identical `text`. NVIDIA's
+  non-overlapping 10-K is just the case with zero repeats.
+- Should sectioning be filer-specific? Still partially open. The mechanism
+  implemented (any `<tr>` linking to an in-document anchor is an index row)
+  generalized cleanly across both filers sampled without special-casing
+  either one, which is more encouraging than the earlier "Workiva/ASML
+  convention" framing suggested. But it is still only two filings, plausibly
+  from the same filing agent. Unverified: a filer whose sectioning device is
+  not table-row-based, or one with a competing internal-link structure.
+- Now that sections exist: what is the next real consumer? Candidates are
+  chunking (Phase 2.5) or a first bounded analyst reading one section's text.
+  Not selected; the roadmap does not choose this automatically.
 
 ## Next Expected Steps
 

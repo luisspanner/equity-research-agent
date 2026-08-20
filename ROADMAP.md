@@ -32,10 +32,11 @@ Completed after V0:
 - [x] EDGAR filing-document retrieval as sourced, untrusted text, held in
   memory only
 - [x] Filing-text extraction, validated against the real ASML Form 20-F
+- [x] Filing sectioning along the filer's own linking index, validated
+  against both ASML's 20-F and NVIDIA's 10-K
 
 No filing capability is used by the research workflow yet. No implementation
-slice is currently active. The next step is to select and review one bounded
-filing-sectioning slice. The roadmap does not select or begin that work
+slice is currently active. The roadmap does not select or begin the next one
 automatically.
 
 Live CLI runs are reserved for bug investigation or after several new features
@@ -127,17 +128,37 @@ against the real ASML Form 20-F. Validating against a live filing changed the
 implementation in ways no synthetic fixture had suggested, and the measured
 findings are recorded in `HANDOFF.md`.
 
-### Next selection: filing sectioning
+### Completed: filing sectioning
 
-Divide one extracted document into labelled sections that chunking and
-retrieval can target. The design question comes first: the filing examined so
-far contains no SEC `Item` headings at all, so a section boundary has to be
-defined from what the document actually contains. Keep chunking, embeddings,
-and analyst integration out of this slice.
+Divided a retrieved document into labelled, possibly overlapping sections
+along the filer's own linking index — a legally operative cross-reference
+table for ASML's 20-F, a conventional table of contents for NVIDIA's 10-K,
+both marked the same underlying way at the DOM level. It deliberately
+consumes retrieved HTML rather than extracted plain text, since extraction
+discards every signal sectioning needs. Chunking, embeddings, and analyst
+integration stayed out of this slice; see `HANDOFF.md` for the mechanism, the
+two-filer validation, and what remains unverified against a third filer.
+
+### Next selection: not yet chosen
 
 Introduce dedicated Market, Moat, Growth, or Risk Analysts only when each has
 a distinct evidence boundary, responsibility, and evaluation criterion—not
 merely because multiple LLM calls are possible.
+
+### Roadmap candidate: quarterly reports (10-Q / 6-K)
+
+Not selected yet. Discovery, retrieval, and extraction are already
+form-agnostic, so fetching a 10-Q needs no plumbing changes there. The real
+work is contract shape, not transport: `get_latest_annual_report` returns one
+filing because "most recent annual report" is inherently singular, while
+quarterly relevance comes mainly from comparing several recent periods —
+that needs a "last N filings of a type" discovery contract, not just a new
+form-type literal. Foreign private issuers such as ASML do not file 10-Qs at
+all; their interim filing is the 6-K, which is far less standardized (often a
+furnished press release with no fixed Item structure), so this is not a
+uniform extension across both filer types the way annual reports were.
+Revisit once quarterly recency is worth more than the added discovery-contract
+complexity.
 
 ## Phase 2.5 — Retrieval / RAG Infrastructure
 
