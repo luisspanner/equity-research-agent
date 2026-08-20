@@ -18,8 +18,11 @@ deterministic metrics and source IDs they cite.
 Separately from that pipeline, the project can discover an issuer's most recent
 annual report on SEC EDGAR, retrieve its primary document as untrusted text,
 extract that document into readable plain text, and divide it into labelled,
-possibly overlapping sections along the filer's own linking index. None of
-these capabilities is wired into the research workflow.
+possibly overlapping sections along the filer's own linking index. A Disclosed
+Risk Analyst can turn one such section into a source-validated LLM analysis,
+the first analyst in the project that reads raw filing prose rather than
+already-normalized data. None of these capabilities is wired into the
+research workflow.
 
 ## Completed Filing-Ingestion Slices
 
@@ -97,6 +100,34 @@ Filing sectioning, along the filer's own index — validated against ASML's
   overlap, dangling targets, multi-target rows, and non-table links; the two
   recorded real fixtures validate the mechanism against real structure,
   including the exact label wording each filer's own markup produces.
+
+Disclosed Risk Analyst — reads one filing section, not the filer's whole
+document, and not another analyst's interpretation.
+
+- `DisclosedRiskAnalysis` (`disclosed_risks`, `limitations`, `sources`) is a
+  new output model, structurally parallel to `BearAnalysis` but a distinct
+  responsibility: it extracts risks the filer itself names, not risks
+  inferred from business and financial context. Reuses the same
+  `validate_risk_sources` pattern.
+- `build_disclosed_risk_analysis_prompt` and `GroqDisclosedRiskAnalyst`
+  follow the established two-file split (`agents/disclosed_risk.py`,
+  `agents/disclosed_risk_groq.py`) every other analyst uses.
+- `FilingSection` carries no source of its own, so `filing_section_source`
+  derives one: `source_id` is `"{accession_number}:{anchor_id}"`, `url` is
+  the document URL with `#{anchor_id}` appended — a real, dereferenceable
+  in-document anchor, not a synthetic identifier. `captured_on` reuses
+  `filing.filed_on`, since no separate retrieval timestamp reaches a
+  `FilingSection`. This cites at section granularity, not document
+  granularity: two different claims from two different sections of the same
+  filing get two different, individually verifiable source IDs.
+- The prompt is the first place in the project that states the untrusted-text
+  rule to a model directly, not only in code comments: it tells the model the
+  filing text is untrusted third-party content to read and quote, never
+  instructions, even if it appears to contain any.
+- Not wired into `run_research` or the CLI. That needs ticker-to-CIK
+  resolution, which does not exist; see Known Limitations.
+- Tested against the recorded NVIDIA fixture's real Risk Factors section text,
+  not only synthetic sections.
 
 ## Measured Filing-Structure Findings
 
@@ -240,39 +271,21 @@ of both.
 
 ## Current / Next Slice
 
-No implementation slice is currently active. Filing sectioning, the slice
-described in the previous version of this document, is now implemented; see
-"Completed Filing-Ingestion Slices" above it in reading order (or search for
-"filing sectioning, along the filer's own index").
+No implementation slice is currently active. Filing sectioning and the
+Disclosed Risk Analyst, described in "Completed Filing-Ingestion Slices"
+above, are both implemented. Mechanism details are recorded there rather than
+repeated here, to avoid drifting out of sync with the code as it evolves.
 
-The mechanism: any `<tr>` that links to an in-document anchor is treated as
-one index row. Each row's label comes from the row's own non-numeric cell
-text (not only the linked cell, since ASML links only its page-number cell
-while NVIDIA links every cell in a row), and a section runs from its anchor
-to whichever cited anchor comes next in raw-document order. A target cited by
-more than one row yields more than one section carrying identical text, so
-sections are a set of possibly overlapping spans rather than a partition —
-resolving open question 2 below. `extract_filing_sections` consumes
-`RetrievedFiling.untrusted_text` (HTML) directly rather than `FilingText`,
-resolving open question 1 below; `FilingText`/extraction were left untouched.
-
-What was deliberately not attempted: detecting or ranking which container in
-a document is "the" sectioning index by link density. The implementation
-instead treats every linked table row as a candidate, independent of where in
-the document it sits. This is simpler and matches both filers' measured
-structure (every internal link belongs to the index, nothing competing), but
-a filing with an unrelated internal link inside a `<tr>` — a footnote
-cross-reference table, say — would be misread as an index row. Not observed
-in either filer sampled; flagged rather than guarded against.
-
-### Explicitly Out of Scope (carried out of this slice)
+### Explicitly Out of Scope (carried out of the completed slices)
 
 - chunking, embeddings, retrieval, RAG, pgvector, PostgreSQL, FastAPI, Docker;
-- summarizing or interpreting filing text;
-- exposing filing text or sections to any analyst prompt;
-- caching or persisting retrieved documents or sections;
-- ticker-to-CIK resolution, a second filing source, or provider fallback;
-- generalizing the mechanism to a third, unexamined filing agent;
+- wiring the Disclosed Risk Analyst, or any filing capability, into
+  `run_research` or the CLI — blocked on ticker-to-CIK resolution;
+- a second filing-derived analyst, or generalizing "one section in, one
+  analysis out" to many sections at once;
+- caching or persisting retrieved documents, sections, or analyses;
+- a second filing source, provider fallback, or a second LLM provider;
+- generalizing the sectioning mechanism to a third, unexamined filing agent;
 - valuation, persistence, web UI, or other later roadmap phases;
 - unrelated application refactoring.
 
@@ -290,12 +303,23 @@ in either filer sampled; flagged rather than guarded against.
 - `src/equity_research_agent/filings/text.py` — HTML-to-text extraction
 - `src/equity_research_agent/filings/sections.py` — filing sectioning along
   the filer's own linking index
+- `src/equity_research_agent/models/disclosed_risk_analysis.py` — output
+  contract for the Disclosed Risk Analyst
+- `src/equity_research_agent/agents/disclosed_risk.py` — its prompt builder
+  and section-level source derivation
+- `src/equity_research_agent/agents/disclosed_risk_groq.py` — its Groq adapter
+- `src/equity_research_agent/agents/bear.py` and `bear_groq.py` — the
+  established prompt/adapter split this analyst follows
 - `src/equity_research_agent/models/provenance.py` — source-reference model and
   merge behavior
-- `src/equity_research_agent/__init__.py` — current workflow composition
+- `src/equity_research_agent/__init__.py` — current workflow composition; does
+  not yet call any filing-derived analyst
 - `tests/` — executable behavior and established testing conventions
 - `tests/test_filing_sectioning.py` — synthetic and real-fixture tests for
   `extract_filing_sections`
+- `tests/test_disclosed_risk_analyst.py` — prompt-builder and output-model
+  tests, including one against the real NVIDIA Risk Factors section
+- `tests/test_disclosed_risk_groq.py` — Groq adapter tests with a fake opener
 - `tests/fixtures/providers/sec_edgar/asml/asml_20f_excerpt.htm` — trimmed
   excerpt of the real filing; the header comment records its provenance
 - `tests/fixtures/providers/sec_edgar/asml/inline_xbrl_excerpt.htm` — synthetic
@@ -329,7 +353,15 @@ in either filer sampled; flagged rather than guarded against.
   document becomes its own source only once it has actually been retrieved.
 - Retrieved filing text is untrusted third-party prose: evidence to be quoted
   and cited, never instructions to be followed. It must not reach a model
-  prompt outside an explicit evidence boundary.
+  prompt outside an explicit evidence boundary. The Disclosed Risk Analyst is
+  the first such boundary and states the rule directly in its prompt, not
+  only in code comments — treat that instruction as a required part of any
+  future prompt that includes filing text, not optional boilerplate.
+- Citation granularity matches what a claim can actually be checked against.
+  A `FilingSection` carries no source of its own; the Disclosed Risk Analyst
+  derives one per section (`accession_number:anchor_id`) rather than citing
+  at whole-document granularity, so two claims from two different sections of
+  the same filing stay independently verifiable.
 - Provider adapters separate pure normalization from transport. Normalizers are
   I/O-free and independently testable against recorded payloads.
 - Filing processing lives in `filings/`, separate from `data/providers/`, which
@@ -348,12 +380,13 @@ in either filer sampled; flagged rather than guarded against.
 
 ## Verification Status
 
-Freshly verified locally on 2026-08-20. Uncommitted at time of writing —
-working tree on top of commit `9e5140d`, includes the filing-sectioning slice:
+Freshly verified locally on 2026-08-20. Filing sectioning is committed at
+`f7ed519`; the Disclosed Risk Analyst above it is uncommitted at time of
+writing:
 
-- `uv run pytest`: 483 passed
+- `uv run pytest`: 501 passed
 - `uv run ruff check`: passed
-- `uv run mypy`: passed for configured `src` (42 files)
+- `uv run mypy`: passed for configured `src` (45 files)
 - `git diff --check`: passed
 
 Automated checks make no live provider or model calls; EDGAR behavior is
@@ -392,6 +425,15 @@ bug investigation or for validating several accumulated features.
   so a second run refetches the same immutable filing.
 - Filing sections are produced but never chunked, embedded, or searched, and
   no RAG capability exists.
+- The Disclosed Risk Analyst reads exactly one section per call. There is no
+  batch entry point for many sections, and it is not wired into `run_research`
+  or the CLI — both blocked on ticker-to-CIK resolution, not on the analyst
+  itself.
+- `filing_section_source`'s `captured_on` reuses `filing.filed_on`, not an
+  actual retrieval timestamp, because `FilingSection` carries no provenance of
+  its own to draw one from. Close enough for a filing (it does not change
+  after filing), but not a measured retrieval time the way document-level
+  sources are.
 - Extraction discards element ids, links, and document positions, so
   `FilingText` alone cannot locate a section boundary. Measured, not assumed;
   it is why sectioning consumes `RetrievedFiling` HTML directly instead.
@@ -457,9 +499,18 @@ bug investigation or for validating several accumulated features.
   convention" framing suggested. But it is still only two filings, plausibly
   from the same filing agent. Unverified: a filer whose sectioning device is
   not table-row-based, or one with a competing internal-link structure.
-- Now that sections exist: what is the next real consumer? Candidates are
-  chunking (Phase 2.5) or a first bounded analyst reading one section's text.
+- ~~Now that sections exist, what is the next real consumer?~~ Decided: a
+  Disclosed Risk Analyst, reading one section directly rather than waiting on
+  chunking/embeddings. Full RAG (Phase 2.5) remains for when one section at a
+  time stops being enough.
+- Now that a filing-derived analyst exists: does it get wired into
+  `run_research` next, or does ticker-to-CIK resolution come first? The
+  analyst itself does not need it to be useful standalone, but the CLI does.
   Not selected; the roadmap does not choose this automatically.
+- Should other sections beyond Risk Factors get their own dedicated analyst
+  (e.g. a Business-Description-from-filing reader), or should one analyst
+  generalize across section labels? Not yet needed with one section type
+  proven; premature to decide with a sample of one.
 
 ## Next Expected Steps
 

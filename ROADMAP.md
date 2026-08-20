@@ -34,10 +34,13 @@ Completed after V0:
 - [x] Filing-text extraction, validated against the real ASML Form 20-F
 - [x] Filing sectioning along the filer's own linking index, validated
   against both ASML's 20-F and NVIDIA's 10-K
+- [x] Disclosed Risk Analyst, reading one filing section directly rather
+  than waiting on chunking or embeddings
 
-No filing capability is used by the research workflow yet. No implementation
-slice is currently active. The roadmap does not select or begin the next one
-automatically.
+No filing capability is used by the research workflow yet — the Disclosed
+Risk Analyst is not wired into `run_research` or the CLI, which needs
+ticker-to-CIK resolution first. No implementation slice is currently active.
+The roadmap does not select or begin the next one automatically.
 
 Live CLI runs are reserved for bug investigation or after several new features
 have accumulated. Unit, integration, lint, and type checks are the default
@@ -135,15 +138,26 @@ along the filer's own linking index — a legally operative cross-reference
 table for ASML's 20-F, a conventional table of contents for NVIDIA's 10-K,
 both marked the same underlying way at the DOM level. It deliberately
 consumes retrieved HTML rather than extracted plain text, since extraction
-discards every signal sectioning needs. Chunking, embeddings, and analyst
-integration stayed out of this slice; see `HANDOFF.md` for the mechanism, the
-two-filer validation, and what remains unverified against a third filer.
+discards every signal sectioning needs. Chunking and embeddings stayed out of
+this slice; see `HANDOFF.md` for the mechanism, the two-filer validation, and
+what remains unverified against a third filer.
+
+### Completed: Disclosed Risk Analyst
+
+A dedicated analyst reading one filing section directly — a distinct
+evidence boundary from Bear Analyst's inferred downside risk, since this
+extracts only the risks a filer discloses about itself. Skips chunking and
+embeddings entirely: one section in, one source-validated analysis out, the
+same evidence-bounded prompt/adapter pattern every other analyst uses. The
+first analyst to read raw filing prose, and the first prompt in the project
+that states the untrusted-content rule directly rather than only in code.
+Not wired into `run_research` or the CLI; see `HANDOFF.md`.
 
 ### Next selection: not yet chosen
 
-Introduce dedicated Market, Moat, Growth, or Risk Analysts only when each has
-a distinct evidence boundary, responsibility, and evaluation criterion—not
-merely because multiple LLM calls are possible.
+Introduce dedicated Market, Moat, Growth, or further Risk Analysts only when
+each has a distinct evidence boundary, responsibility, and evaluation
+criterion—not merely because multiple LLM calls are possible.
 
 ### Roadmap candidate: quarterly reports (10-Q / 6-K)
 
