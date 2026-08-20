@@ -264,6 +264,21 @@ def test_filing_section_retains_its_label_anchor_and_text() -> None:
     assert section.label == "Item 3.D. Risk Factors"
     assert section.anchor_id == "i1edf02a2dc3144cf83a1843d2038ab4e_214"
     assert "substantial portion" in section.text
+    assert section.item_identifier is None
+    assert section.form_caption is None
+    assert section.location_label is None
+
+
+def test_filing_section_retains_optional_index_metadata() -> None:
+    section = make_filing_section(
+        item_identifier="3.D",
+        form_caption="Risk Factors",
+        location_label="Risk – Risk factors",
+    )
+
+    assert section.item_identifier == "3.D"
+    assert section.form_caption == "Risk Factors"
+    assert section.location_label == "Risk – Risk factors"
 
 
 def test_filing_section_is_immutable() -> None:
@@ -273,7 +288,17 @@ def test_filing_section_is_immutable() -> None:
         section.text = "replaced"  # type: ignore[misc]
 
 
-@pytest.mark.parametrize("field", ["label", "anchor_id", "text"])
+@pytest.mark.parametrize(
+    "field",
+    [
+        "label",
+        "anchor_id",
+        "text",
+        "item_identifier",
+        "form_caption",
+        "location_label",
+    ],
+)
 def test_filing_section_rejects_empty_fields(field: str) -> None:
     with pytest.raises(ValidationError):
         make_filing_section(**{field: ""})

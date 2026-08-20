@@ -19,9 +19,11 @@ Separately from that pipeline, the project can resolve a ticker to its SEC
 CIK, discover an issuer's most recent annual report on SEC EDGAR, retrieve its
 primary document as untrusted text, extract that document into readable plain
 text, and divide it into labelled, possibly overlapping sections along the
-filer's own linking index. A Disclosed Risk Analyst can turn one such section
-into a source-validated LLM analysis, the first analyst in the project that
-reads raw filing prose rather than already-normalized data. None of these
+filer's own linking index. Where that index exposes measured form-item
+metadata, it can deterministically select the unique disclosed-risk section:
+10-K Item 1A or 20-F Item 3.D. A Disclosed Risk Analyst can turn that one
+section into a source-validated LLM analysis, the first analyst in the project
+that reads raw filing prose rather than already-normalized data. None of these
 capabilities is wired into the research workflow.
 
 ## Completed Filing-Ingestion Slices
@@ -79,10 +81,10 @@ against the real filing.
 Filing sectioning, along the filer's own index — validated against ASML's
 20-F and NVIDIA's 10-K.
 
-- `FilingSection` (label, anchor id, text) and `SectionedFiling` (filing,
-  sections, sources) are new domain models. `SectionedFiling.sections` allows
-  more than one section per anchor, since the mapping measured on ASML's
-  filing is many-to-many.
+- `FilingSection` records its display label, anchor id, text, and optional
+  form-item metadata; `SectionedFiling` records the filing, sections, and
+  sources. `SectionedFiling.sections` allows more than one section per anchor,
+  since the mapping measured on ASML's filing is many-to-many.
 - `extract_filing_sections` in a new `filings/sections.py` consumes
   `RetrievedFiling` directly, not `FilingText`: every boundary signal
   extraction discards is exactly what sectioning needs.
@@ -96,6 +98,10 @@ Filing sectioning, along the filer's own index — validated against ASML's
   by the index does not bound a section, only cited targets do.
 - Adds no source, matching the precedent `FilingText` set: sectioning is a
   transformation of an already-retrieved document, not a new retrieval.
+- Item metadata is produced only for the two index structures measured so far:
+  ASML's four-column 20-F reference table, including inherited parent/sub-item
+  identity, and a gated NVIDIA-style three-column 10-K table of contents.
+  Other linked-table rows remain sections, but carry no structural item claim.
 - Tested with the established dual-fixture convention: synthetic cases isolate
   overlap, dangling targets, multi-target rows, and non-table links; the two
   recorded real fixtures validate the mechanism against real structure,
@@ -152,6 +158,26 @@ capability belongs.
 - Deliberately excludes fuzzy/partial ticker matching, caching the ~800 KB
   ticker table across calls, and populating `SecurityIdentity.cik` or wiring
   into `run_research`/the CLI — those remain separate, unstarted work.
+
+Risk Factors section selection — creates the exact one-section input boundary
+for the Disclosed Risk Analyst.
+
+- `select_risk_factors_section` selects by the filing form's structural item,
+  not by title wording: SEC Form 10-K Item `1A`; SEC Form 20-F Item `3.D`.
+  These mappings come from the forms, not from the two measured filings. A
+  synthetic `Risks` caption test verifies that the selector uses item metadata,
+  not that such a caption is necessarily SEC-compliant.
+- It accepts repeated entries only when they point to one anchor and carry
+  identical text. This deliberately accepts ASML's duplicate entries for one
+  anchored span while retaining the first encountered label for context.
+- Missing expected metadata, conflicting text at one matching anchor, or
+  distinct matching anchors returns a typed unavailable reason. A future
+  workflow can render that as an evidence limitation rather than fail an entire
+  research run; the selector still cannot silently infer from a title or pick
+  among possible boundaries.
+- Tested against the recorded ASML and NVIDIA fixtures, plus synthetic title
+  variation, absent/incorrect metadata, and ambiguity cases. It does not
+  retrieve, invoke a model, or wire filing analysis into the workflow.
 
 ## Measured Filing-Structure Findings
 
@@ -333,6 +359,9 @@ the code as it evolves.
 - `src/equity_research_agent/filings/text.py` — HTML-to-text extraction
 - `src/equity_research_agent/filings/sections.py` — filing sectioning along
   the filer's own linking index
+- `src/equity_research_agent/filings/risk_factors.py` — deterministic,
+  fail-closed form-item selection of the disclosed-risk section for the
+  existing Disclosed Risk Analyst
 - `src/equity_research_agent/models/disclosed_risk_analysis.py` — output
   contract for the Disclosed Risk Analyst
 - `src/equity_research_agent/agents/disclosed_risk.py` — its prompt builder
@@ -422,13 +451,14 @@ the code as it evolves.
 
 ## Verification Status
 
-Freshly verified locally on 2026-08-20. Filing sectioning is committed at
-`f7ed519`; the Disclosed Risk Analyst is committed at `6284e94`; ticker-to-CIK
-resolution is committed at `4919f56`:
+Freshly verified locally on 2026-08-20 after the structural Risk Factors
+section-selection slice. Filing sectioning is committed at `f7ed519`; the
+Disclosed Risk Analyst is committed at `6284e94`; ticker-to-CIK resolution is
+committed at `4919f56`:
 
-- `uv run pytest`: 520 passed
+- `uv run pytest`: 538 passed
 - `uv run ruff check`: passed
-- `uv run mypy`: passed for configured `src` (45 files)
+- `uv run mypy`: passed for configured `src` (46 files)
 - `git diff --check`: passed
 
 Automated checks make no live provider or model calls; EDGAR behavior is
@@ -486,6 +516,11 @@ bug investigation or for validating several accumulated features.
   batch entry point for many sections, and it is not wired into `run_research`
   or the CLI. Ticker-to-CIK resolution exists, but the integration's CIK
   policy and failure behaviour are still unselected.
+- Risk Factors selection requires structural item metadata from a measured
+  index shape: 10-K Item `1A` or 20-F Item `3.D`. It does not need a title such
+  as `Risk Factors`, but a filing without recognized metadata, or with two
+  distinct matching anchors for the expected item, raises instead of guessing.
+  Supporting another index shape requires new measured evidence.
 - `filing_section_source`'s `captured_on` reuses `filing.filed_on`, not an
   actual retrieval timestamp, because `FilingSection` carries no provenance of
   its own to draw one from. Close enough for a filing (it does not change
@@ -574,11 +609,16 @@ bug investigation or for validating several accumulated features.
 
 ## Next Expected Steps
 
-1. Select and review one bounded filing-integration slice.
-2. Inspect only the filing models, extraction, and tests relevant to it.
-3. Propose the implementation approach and affected files under `AGENTS.md`.
-4. Wait for approval if the request is planning or review-first, then implement
-   and verify only the selected slice.
+1. Select and review the CIK policy for filing integration: whether to trust an
+   available profile CIK, resolve through SEC, or explicitly compare both.
+2. Select one bounded workflow-integration slice that fetches the latest
+   filing, sections it, selects Risk Factors, and invokes the existing analyst
+   without adding RAG or a second filing analyst.
+3. Decide its explicit failure behaviour before code: filing absence/provider
+   failure must not become an invented qualitative conclusion.
+4. Propose the implementation approach and affected files under `AGENTS.md`,
+   then implement and verify only the selected slice after approval when the
+   request is planning or review-first.
 
 ## Cross-Agent Handoff
 

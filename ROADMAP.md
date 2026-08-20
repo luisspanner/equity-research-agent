@@ -38,13 +38,16 @@ Completed after V0:
   than waiting on chunking or embeddings
 - [x] Ticker-to-CIK resolution on `EdgarFilingProvider`, validated with a
   live fetch against SEC's real ticker file
+- [x] Deterministic selection of a unique disclosed-risk section by filing
+  form item: 10-K Item 1A or 20-F Item 3.D
 
 No filing capability is used by the research workflow yet — the Disclosed
 Risk Analyst is not wired into `run_research` or the CLI, and
-`SecurityIdentity.cik` is still never populated. Ticker-to-CIK resolution
-exists now, so that wiring is no longer blocked on a missing capability, but
-it has not been selected as a slice. No implementation slice is currently
-active. The roadmap does not select or begin the next one automatically.
+the workflow neither uses a profile CIK when present nor falls back to SEC
+resolution when it is missing. Ticker-to-CIK resolution exists now, so that
+wiring is no longer blocked on a missing capability, but it has not been
+selected as a slice. No implementation slice is currently active. The roadmap
+does not select or begin the next one automatically.
 
 Live CLI runs are reserved for bug investigation or after several new features
 have accumulated. Unit, integration, lint, and type checks are the default
@@ -165,6 +168,20 @@ provider's existing rate limiting and contact-user-agent conventions rather
 than a new resolver class. Validated with a live fetch of the real file.
 Deliberately excludes fuzzy matching, caching, and populating
 `SecurityIdentity.cik` or any workflow/CLI wiring — see `HANDOFF.md`.
+
+### Completed: Risk Factors section selection
+
+`select_risk_factors_section` establishes the exact one-section input boundary
+for the existing Disclosed Risk Analyst. It selects by the SEC form's
+structural item rather than its display title: 10-K Item `1A` or 20-F Item
+`3.D`. Those mappings are form-defined; the HTML metadata parser is separately
+limited to the measured ASML 20-F reference-table shape and a gated
+NVIDIA-style 10-K table of contents. Missing metadata, conflicting text at one
+anchor, or distinct expected-item anchors return typed unavailable reasons
+rather than falling back to title matching or heuristic ranking. A later
+workflow can render that outcome as a limitation. The selector is deterministic
+and uses existing section data only; it does not retrieve filings, invoke an
+LLM, or wire filing analysis into the CLI.
 
 ### Next selection: not yet chosen
 

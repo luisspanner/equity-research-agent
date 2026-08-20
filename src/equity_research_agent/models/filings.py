@@ -86,11 +86,16 @@ class FilingSection(DomainModel):
 
     More than one label can point to the same anchor, so a filing's sections
     are not guaranteed to be disjoint: two sections can carry identical text.
+    Where a filing's own index exposes a recognized form structure, the
+    optional metadata records that structure separately from the display label.
     """
 
     label: NonEmptyString
     anchor_id: NonEmptyString
     text: DocumentText
+    item_identifier: NonEmptyString | None = None
+    form_caption: NonEmptyString | None = None
+    location_label: NonEmptyString | None = None
 
 
 class SectionedFiling(DomainModel):

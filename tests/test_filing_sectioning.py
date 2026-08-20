@@ -230,6 +230,99 @@ def test_sectioning_adds_no_source_and_keeps_the_filings_provenance() -> None:
     assert result.sources == retrieved.sources
 
 
+def test_form_20_f_subitem_uses_its_parent_and_keeps_continuations_unenriched() -> None:
+    document = (
+        "<table>"
+        "<tr><td>Item</td><td>Form 20-F caption</td>"
+        "<td>Location in this document</td><td>Page</td></tr>"
+        "<tr><td>3</td><td>Key information</td><td></td><td></td></tr>"
+        "<tr><td></td><td>D. Risk Factors</td><td>Risk overview</td>"
+        "<td><a href='#risk'>66</a></td></tr>"
+        "<tr><td></td><td></td><td>Risk continuation</td>"
+        "<td><a href='#continuation'>67</a></td></tr>"
+        "</table><div id='risk'></div><p>risks</p>"
+        "<div id='continuation'></div><p>more risks</p>"
+    )
+
+    result = extract_filing_sections(make_retrieved(document))
+
+    risk, continuation = result.sections
+    assert (risk.item_identifier, risk.form_caption, risk.location_label) == (
+        "3.D",
+        "Risk Factors",
+        "Risk overview",
+    )
+    assert (
+        continuation.item_identifier,
+        continuation.form_caption,
+        continuation.location_label,
+    ) == (None, None, None)
+
+
+def test_form_20_f_parent_does_not_carry_across_reference_tables() -> None:
+    headers = (
+        "<tr><td>Item</td><td>Form 20-F caption</td>"
+        "<td>Location in this document</td><td>Page</td></tr>"
+    )
+    document = (
+        "<table>"
+        + headers
+        + "<tr><td>3</td><td>Key information</td><td></td><td></td></tr>"
+        "</table><table>"
+        + headers
+        + "<tr><td></td><td>D. Risk Factors</td><td>Risk overview</td>"
+        "<td><a href='#risk'>66</a></td></tr>"
+        "</table><div id='risk'></div><p>risks</p>"
+    )
+
+    section = extract_filing_sections(make_retrieved(document)).sections[0]
+
+    assert (section.item_identifier, section.form_caption, section.location_label) == (
+        None,
+        None,
+        None,
+    )
+
+
+def test_form_10_k_toc_keeps_item_and_caption_without_a_location() -> None:
+    document = (
+        "<table><tr><td></td><td></td><td>Page</td></tr>"
+        "<tr><td><a href='#risk'>Item 1A.</a></td>"
+        "<td><a href='#risk'>Risk Factors</a></td>"
+        "<td><a href='#risk'>12</a></td></tr></table>"
+        "<div id='risk'></div><p>risks</p>"
+    )
+
+    section = extract_filing_sections(
+        make_retrieved(document, filing=make_filing(form_type="10-K"))
+    ).sections[0]
+
+    assert (section.item_identifier, section.form_caption, section.location_label) == (
+        "1A",
+        "Risk Factors",
+        None,
+    )
+
+
+def test_unrecognized_10_k_item_row_keeps_no_structural_metadata() -> None:
+    document = (
+        "<table><tr><td><a href='#risk'>Item 1A.</a></td>"
+        "<td><a href='#risk'>Risk Factors</a></td>"
+        "<td><a href='#risk'>12</a></td></tr></table>"
+        "<div id='risk'></div><p>risks</p>"
+    )
+
+    section = extract_filing_sections(
+        make_retrieved(document, filing=make_filing(form_type="10-K"))
+    ).sections[0]
+
+    assert (section.item_identifier, section.form_caption, section.location_label) == (
+        None,
+        None,
+        None,
+    )
+
+
 def real_asml_sections() -> list[tuple[str, str, str]]:
     """Section the recorded excerpt of ASML's reference table and content."""
 
@@ -272,6 +365,17 @@ def test_real_asml_label_is_built_from_the_row_since_only_the_page_links() -> No
     assert "B. Business Overview At a glance" in labels
 
 
+def test_real_asml_risk_factors_retains_its_form_20_f_structure() -> None:
+    result = extract_filing_sections(make_retrieved(ASML_FIXTURE.read_text()))
+
+    risk_section = next(
+        section for section in result.sections if section.item_identifier == "3.D"
+    )
+
+    assert risk_section.form_caption == "Risk Factors"
+    assert risk_section.location_label == "Risk – Risk factors"
+
+
 def real_nvda_sections() -> list[tuple[str, str, str]]:
     """Section the recorded excerpt of NVIDIA's table of contents and content."""
 
@@ -304,3 +408,16 @@ def test_real_nvda_second_section_starts_at_its_own_heading() -> None:
 
     assert text.startswith("Item 1A. Risk Factors\n")
     assert "Risks Related to Our Industry and Markets" in text
+
+
+def test_real_nvda_risk_factors_retains_its_10_k_structure() -> None:
+    result = extract_filing_sections(
+        make_retrieved(NVDA_FIXTURE.read_text(), filing=make_filing(form_type="10-K"))
+    )
+
+    risk_section = next(
+        section for section in result.sections if section.item_identifier == "1A"
+    )
+
+    assert risk_section.form_caption == "Risk Factors"
+    assert risk_section.location_label is None
