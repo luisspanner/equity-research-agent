@@ -15,14 +15,14 @@ Financial Quality Analyst is fully integrated into workflow orchestration,
 Synthesis, and reporting, and its findings are validated against the exact
 deterministic metrics and source IDs they cite.
 
-Separately from that pipeline, the project can discover an issuer's most recent
-annual report on SEC EDGAR, retrieve its primary document as untrusted text,
-extract that document into readable plain text, and divide it into labelled,
-possibly overlapping sections along the filer's own linking index. A Disclosed
-Risk Analyst can turn one such section into a source-validated LLM analysis,
-the first analyst in the project that reads raw filing prose rather than
-already-normalized data. None of these capabilities is wired into the
-research workflow.
+Separately from that pipeline, the project can resolve a ticker to its SEC
+CIK, discover an issuer's most recent annual report on SEC EDGAR, retrieve its
+primary document as untrusted text, extract that document into readable plain
+text, and divide it into labelled, possibly overlapping sections along the
+filer's own linking index. A Disclosed Risk Analyst can turn one such section
+into a source-validated LLM analysis, the first analyst in the project that
+reads raw filing prose rather than already-normalized data. None of these
+capabilities is wired into the research workflow.
 
 ## Completed Filing-Ingestion Slices
 
@@ -124,10 +124,34 @@ document, and not another analyst's interpretation.
   rule to a model directly, not only in code comments: it tells the model the
   filing text is untrusted third-party content to read and quote, never
   instructions, even if it appears to contain any.
-- Not wired into `run_research` or the CLI. That needs ticker-to-CIK
-  resolution, which does not exist; see Known Limitations.
+- Not wired into `run_research` or the CLI. That needed ticker-to-CIK
+  resolution, which now exists (below) but is not yet used by either; see
+  Known Limitations.
 - Tested against the recorded NVIDIA fixture's real Risk Factors section text,
   not only synthetic sections.
+
+Ticker-to-CIK resolution — resolves the open question of where this
+capability belongs.
+
+- `normalize_cik_from_ticker` in `edgar.py` is a pure normalizer for SEC's
+  `company_tickers.json` contract: exact, case-insensitive ticker match, no
+  fuzzy matching. It skips malformed entries while searching, but raises
+  `EdgarNormalizationError` if the *matched* entry's `cik_str` is invalid, or
+  if no entry matches at all.
+- `EdgarFilingProvider.resolve_cik(ticker)` is the transport method, living on
+  the existing provider rather than a new resolver class or the caller, so it
+  reuses the provider's rate limiter, declared contact user agent, and
+  timeout/error handling instead of duplicating them.
+- Returns a plain `str`, not a sourced domain object: unlike a filing, a
+  resolved CIK is not itself a citable report fact, so it carries no
+  `SourceReference`.
+- Validated with a live fetch (three requests, declared contact user agent):
+  `EdgarFilingProvider.resolve_cik` correctly resolved `ASML` → `937966`,
+  `nvda` → `1045810` (case-insensitivity), and `AAPL` → `320193` against the
+  real, current SEC file.
+- Deliberately excludes fuzzy/partial ticker matching, caching the ~800 KB
+  ticker table across calls, and populating `SecurityIdentity.cik` or wiring
+  into `run_research`/the CLI — those remain separate, unstarted work.
 
 ## Measured Filing-Structure Findings
 
@@ -271,16 +295,21 @@ of both.
 
 ## Current / Next Slice
 
-No implementation slice is currently active. Filing sectioning and the
-Disclosed Risk Analyst, described in "Completed Filing-Ingestion Slices"
-above, are both implemented. Mechanism details are recorded there rather than
-repeated here, to avoid drifting out of sync with the code as it evolves.
+No implementation slice is currently active. Filing sectioning, the Disclosed
+Risk Analyst, and ticker-to-CIK resolution, described in "Completed
+Filing-Ingestion Slices" above, are all implemented. Mechanism details are
+recorded there rather than repeated here, to avoid drifting out of sync with
+the code as it evolves.
 
 ### Explicitly Out of Scope (carried out of the completed slices)
 
 - chunking, embeddings, retrieval, RAG, pgvector, PostgreSQL, FastAPI, Docker;
 - wiring the Disclosed Risk Analyst, or any filing capability, into
-  `run_research` or the CLI — blocked on ticker-to-CIK resolution;
+  `run_research` or the CLI, and populating `SecurityIdentity.cik` from
+  `resolve_cik` — no longer blocked on missing ticker-to-CIK resolution, but
+  not yet selected as a slice;
+- fuzzy or partial ticker matching, and caching the ticker-to-CIK table across
+  calls;
 - a second filing-derived analyst, or generalizing "one section in, one
   analysis out" to many sections at once;
 - caching or persisting retrieved documents, sections, or analyses;
@@ -298,8 +327,9 @@ repeated here, to avoid drifting out of sync with the code as it evolves.
   extracted-filing contracts
 - `src/equity_research_agent/data/providers/base.py` — provider protocols
 - `src/equity_research_agent/data/providers/edgar.py` — submissions normalizer
-- `src/equity_research_agent/data/providers/edgar_provider.py` — EDGAR transport
-  and document retrieval
+  and `normalize_cik_from_ticker`, the ticker-to-CIK normalizer
+- `src/equity_research_agent/data/providers/edgar_provider.py` — EDGAR
+  transport, document retrieval, and `resolve_cik`
 - `src/equity_research_agent/filings/text.py` — HTML-to-text extraction
 - `src/equity_research_agent/filings/sections.py` — filing sectioning along
   the filer's own linking index
@@ -315,6 +345,13 @@ repeated here, to avoid drifting out of sync with the code as it evolves.
 - `src/equity_research_agent/__init__.py` — current workflow composition; does
   not yet call any filing-derived analyst
 - `tests/` — executable behavior and established testing conventions
+- `tests/test_edgar_normalizer.py` — includes `normalize_cik_from_ticker` tests
+  against a recorded, trimmed `company_tickers.json` excerpt
+- `tests/test_edgar_provider.py` — includes `resolve_cik` transport tests with
+  a fake opener
+- `tests/fixtures/providers/sec_edgar/company_tickers_excerpt.json` — trimmed
+  excerpt of the real, live-fetched SEC company-tickers file (NVDA, AAPL,
+  MSFT, ASML)
 - `tests/test_filing_sectioning.py` — synthetic and real-fixture tests for
   `extract_filing_sections`
 - `tests/test_disclosed_risk_analyst.py` — prompt-builder and output-model
@@ -372,6 +409,11 @@ repeated here, to avoid drifting out of sync with the code as it evolves.
   keep those rules honest. Both are kept deliberately.
 - CIK zero-padding is an EDGAR request detail handled at the adapter boundary;
   the domain keeps the unpadded CIK already carried by `SecurityIdentity`.
+- Ticker-to-CIK resolution lives on `EdgarFilingProvider`, not a dedicated
+  resolver class or the caller, so it reuses the provider's existing rate
+  limiting and contact-user-agent conventions rather than duplicating them. It
+  returns a plain string, not a sourced domain object, since a resolved CIK is
+  not itself a citable fact the way a filing is.
 - Add a dedicated analyst only when its responsibility, evidence boundary, or
   evaluation criteria are meaningfully distinct.
 - Extract shared infrastructure only after duplication is demonstrated. Keep
@@ -381,10 +423,10 @@ repeated here, to avoid drifting out of sync with the code as it evolves.
 ## Verification Status
 
 Freshly verified locally on 2026-08-20. Filing sectioning is committed at
-`f7ed519`; the Disclosed Risk Analyst above it is uncommitted at time of
-writing:
+`f7ed519`; the Disclosed Risk Analyst is committed at `6284e94`; ticker-to-CIK
+resolution above it is uncommitted at time of writing:
 
-- `uv run pytest`: 501 passed
+- `uv run pytest`: 520 passed
 - `uv run ruff check`: passed
 - `uv run mypy`: passed for configured `src` (45 files)
 - `git diff --check`: passed
@@ -402,6 +444,12 @@ The second-filer findings came from one further live EDGAR fetch the same
 day (two more requests, same provider, same declared contact user agent) of
 NVIDIA's 10-K. Reproducible from `toc_excerpt.htm` without refetching.
 
+Ticker-to-CIK resolution was validated with one further live fetch the same
+day: one request to build `company_tickers_excerpt.json`, then three requests
+through `EdgarFilingProvider.resolve_cik` itself (`ASML`, `nvda`, `AAPL`),
+each matching the known real CIK. Reproducible from the fixture without
+refetching.
+
 Live runs differ in cost and should be treated differently. EDGAR needs no API
 key and has no daily quota, so a live filing fetch costs two requests and is
 worth doing whenever document handling changes; be polite with the declared
@@ -414,8 +462,15 @@ bug investigation or for validating several accumulated features.
 - Filing discovery reads only the `filings.recent` block of the EDGAR
   submissions index. An issuer whose latest annual report has aged out of that
   block raises rather than returning an older filing.
-- Filing discovery takes a CIK. There is no ticker-to-CIK resolution, and
-  nothing in the research workflow calls `EdgarFilingProvider` yet.
+- Filing discovery takes a CIK. Ticker-to-CIK resolution now exists
+  (`EdgarFilingProvider.resolve_cik`), but nothing calls it yet:
+  `SecurityIdentity.cik` is still never populated, and nothing in the
+  research workflow calls `EdgarFilingProvider` at all.
+- `resolve_cik` fetches and parses the full ~800 KB `company_tickers.json` on
+  every call; there is no caching across calls within or between runs.
+- `resolve_cik` does exact, case-insensitive matching only. A ticker not
+  present verbatim in SEC's file (e.g. a class-share suffix rendered
+  differently than expected) resolves to nothing rather than a best guess.
 - Alpha Vantage is the only financial-data provider and EDGAR the only filing
   source currently implemented.
 - Groq is the only LLM provider currently implemented. The workflow protocols,
@@ -476,8 +531,11 @@ bug investigation or for validating several accumulated features.
   parser iteration makes refetching painful. Filings are immutable, so such a
   cache needs no invalidation. PostgreSQL and pgvector belong to Phase 2.5,
   when chunks and embeddings exist to query, not to raw document storage.
-- Where does ticker-to-CIK resolution belong once the workflow needs filings:
-  the financial-data provider, a dedicated resolver, or the caller?
+- ~~Where does ticker-to-CIK resolution belong once the workflow needs
+  filings: the financial-data provider, a dedicated resolver, or the
+  caller?~~ Decided and implemented: `EdgarFilingProvider.resolve_cik`, not a
+  new resolver class or the caller, so it reuses the provider's existing rate
+  limiting and contact-user-agent conventions.
 - ~~What marks a section boundary in a filing that has no `Item` headings?~~
   Measured: the filer's cross-reference table, which is also the filer's own
   statement of what is legally part of the 20-F. The competing candidates are
@@ -503,10 +561,10 @@ bug investigation or for validating several accumulated features.
   Disclosed Risk Analyst, reading one section directly rather than waiting on
   chunking/embeddings. Full RAG (Phase 2.5) remains for when one section at a
   time stops being enough.
-- Now that a filing-derived analyst exists: does it get wired into
-  `run_research` next, or does ticker-to-CIK resolution come first? The
-  analyst itself does not need it to be useful standalone, but the CLI does.
-  Not selected; the roadmap does not choose this automatically.
+- Ticker-to-CIK resolution now exists. Does wiring the Disclosed Risk
+  Analyst (and `SecurityIdentity.cik`) into `run_research`/the CLI come next,
+  or does something else? Not selected; the roadmap does not choose this
+  automatically.
 - Should other sections beyond Risk Factors get their own dedicated analyst
   (e.g. a Business-Description-from-filing reader), or should one analyst
   generalize across section labels? Not yet needed with one section type

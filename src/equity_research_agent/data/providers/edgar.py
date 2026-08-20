@@ -83,6 +83,43 @@ def normalize_latest_annual_report(
         ) from error
 
 
+def normalize_cik_from_ticker(payload: object, ticker: str) -> str:
+    """Return the CIK for ``ticker`` in SEC's ``company_tickers.json`` payload.
+
+    Matching is exact and case-insensitive; no fuzzy or partial matching is
+    attempted. Entries that do not match the requested ticker are ignored even
+    if malformed, since only the matched entry needs to satisfy the contract.
+    """
+
+    normalized_ticker = ticker.strip().upper()
+    if not normalized_ticker:
+        raise EdgarNormalizationError("ticker must not be blank")
+    if not isinstance(payload, Mapping):
+        raise EdgarNormalizationError(
+            "company tickers payload must be an object of ticker entries"
+        )
+
+    for entry in payload.values():
+        if not isinstance(entry, Mapping):
+            continue
+        entry_ticker = entry.get("ticker")
+        if not isinstance(entry_ticker, str):
+            continue
+        if entry_ticker.strip().upper() != normalized_ticker:
+            continue
+        return _cik_str_value(entry.get("cik_str"))
+
+    raise EdgarNormalizationError(f"no CIK found for ticker {ticker!r}")
+
+
+def _cik_str_value(value: object) -> str:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return str(value)
+    if isinstance(value, str) and value.strip().isdigit():
+        return value.strip().lstrip("0") or "0"
+    raise EdgarNormalizationError("matched ticker entry has an invalid cik_str")
+
+
 def _annual_report_form_type(form: str) -> AnnualReportFormType | None:
     """Return the annual-report form type, excluding amendments and other forms."""
 

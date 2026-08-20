@@ -24,6 +24,14 @@ FIXTURE_PATH = (
     / "submissions.json"
 )
 
+COMPANY_TICKERS_FIXTURE_PATH = (
+    Path(__file__).parent
+    / "fixtures"
+    / "providers"
+    / "sec_edgar"
+    / "company_tickers_excerpt.json"
+)
+
 USER_AGENT = "Equity Research Agent research@example.test"
 
 
@@ -68,6 +76,90 @@ def recorded_requests(monkeypatch: pytest.MonkeyPatch) -> list[Request]:
         lambda delay: None,
     )
     return requests
+
+
+@pytest.fixture
+def ticker_requests(monkeypatch: pytest.MonkeyPatch) -> list[Request]:
+    """Replace urlopen with the recorded company-tickers fixture, recording requests."""
+
+    requests: list[Request] = []
+
+    def fake_urlopen(request: Request, *, timeout: float) -> FakeResponse:
+        assert timeout == 10.0
+        requests.append(request)
+        return FakeResponse(COMPANY_TICKERS_FIXTURE_PATH.read_bytes())
+
+    monkeypatch.setattr(
+        "equity_research_agent.data.providers.edgar_provider.urlopen",
+        fake_urlopen,
+    )
+    monkeypatch.setattr(
+        "equity_research_agent.data.providers.edgar_provider.sleep",
+        lambda delay: None,
+    )
+    return requests
+
+
+def test_resolve_cik_fetches_and_normalizes_the_company_tickers_file(
+    ticker_requests: list[Request],
+) -> None:
+    cik = EdgarFilingProvider(USER_AGENT).resolve_cik("ASML")
+
+    assert cik == "937966"
+    assert len(ticker_requests) == 1
+    assert ticker_requests[0].full_url == (
+        "https://www.sec.gov/files/company_tickers.json"
+    )
+
+
+def test_resolve_cik_sends_the_contact_user_agent_edgar_requires(
+    ticker_requests: list[Request],
+) -> None:
+    EdgarFilingProvider(f"  {USER_AGENT}  ").resolve_cik("ASML")
+
+    assert ticker_requests[0].get_header("User-agent") == USER_AGENT
+    assert ticker_requests[0].get_header("Accept") == "application/json"
+
+
+def test_resolve_cik_wraps_network_errors_safely(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def failing_urlopen(request: Request, *, timeout: float) -> FakeResponse:
+        raise URLError("connection unavailable")
+
+    monkeypatch.setattr(
+        "equity_research_agent.data.providers.edgar_provider.urlopen",
+        failing_urlopen,
+    )
+
+    with pytest.raises(EdgarProviderError) as error:
+        EdgarFilingProvider(USER_AGENT).resolve_cik("ASML")
+
+    assert "https://" not in str(error.value)
+
+
+def test_resolve_cik_rejects_invalid_json_safely(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_urlopen(request: Request, *, timeout: float) -> FakeResponse:
+        return FakeResponse(b"not json")
+
+    monkeypatch.setattr(
+        "equity_research_agent.data.providers.edgar_provider.urlopen",
+        fake_urlopen,
+    )
+
+    with pytest.raises(EdgarProviderError) as error:
+        EdgarFilingProvider(USER_AGENT).resolve_cik("ASML")
+
+    assert "https://" not in str(error.value)
+
+
+def test_resolve_cik_propagates_normalizer_errors_for_an_unknown_ticker(
+    ticker_requests: list[Request],
+) -> None:
+    with pytest.raises(EdgarNormalizationError, match="no CIK found"):
+        EdgarFilingProvider(USER_AGENT).resolve_cik("NOSUCHTICKER")
 
 
 def test_provider_conforms_to_filing_provider_protocol() -> None:

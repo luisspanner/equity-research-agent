@@ -36,11 +36,15 @@ Completed after V0:
   against both ASML's 20-F and NVIDIA's 10-K
 - [x] Disclosed Risk Analyst, reading one filing section directly rather
   than waiting on chunking or embeddings
+- [x] Ticker-to-CIK resolution on `EdgarFilingProvider`, validated with a
+  live fetch against SEC's real ticker file
 
 No filing capability is used by the research workflow yet — the Disclosed
-Risk Analyst is not wired into `run_research` or the CLI, which needs
-ticker-to-CIK resolution first. No implementation slice is currently active.
-The roadmap does not select or begin the next one automatically.
+Risk Analyst is not wired into `run_research` or the CLI, and
+`SecurityIdentity.cik` is still never populated. Ticker-to-CIK resolution
+exists now, so that wiring is no longer blocked on a missing capability, but
+it has not been selected as a slice. No implementation slice is currently
+active. The roadmap does not select or begin the next one automatically.
 
 Live CLI runs are reserved for bug investigation or after several new features
 have accumulated. Unit, integration, lint, and type checks are the default
@@ -152,6 +156,15 @@ same evidence-bounded prompt/adapter pattern every other analyst uses. The
 first analyst to read raw filing prose, and the first prompt in the project
 that states the untrusted-content rule directly rather than only in code.
 Not wired into `run_research` or the CLI; see `HANDOFF.md`.
+
+### Completed: ticker-to-CIK resolution
+
+`EdgarFilingProvider.resolve_cik` resolves a listed ticker to its SEC CIK by
+fetching and exact-matching against SEC's `company_tickers.json`, reusing the
+provider's existing rate limiting and contact-user-agent conventions rather
+than a new resolver class. Validated with a live fetch of the real file.
+Deliberately excludes fuzzy matching, caching, and populating
+`SecurityIdentity.cik` or any workflow/CLI wiring — see `HANDOFF.md`.
 
 ### Next selection: not yet chosen
 

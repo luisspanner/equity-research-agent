@@ -11,6 +11,7 @@ from pydantic import HttpUrl
 
 from equity_research_agent.data.providers.edgar import (
     EdgarNormalizationError,
+    normalize_cik_from_ticker,
     normalize_latest_annual_report,
 )
 from equity_research_agent.models.provenance import SourceReference
@@ -23,6 +24,22 @@ FIXTURE_PATH = (
     / "asml"
     / "submissions.json"
 )
+
+COMPANY_TICKERS_FIXTURE_PATH = (
+    Path(__file__).parent
+    / "fixtures"
+    / "providers"
+    / "sec_edgar"
+    / "company_tickers_excerpt.json"
+)
+
+
+def load_company_tickers() -> dict[str, Any]:
+    """Load a mutable copy of the recorded, trimmed company-tickers payload."""
+
+    with COMPANY_TICKERS_FIXTURE_PATH.open() as fixture_file:
+        payload: dict[str, Any] = json.load(fixture_file)
+    return payload
 
 
 def make_source() -> SourceReference:
@@ -248,3 +265,59 @@ def test_normalizer_does_not_mutate_the_supplied_payload() -> None:
     normalize_latest_annual_report(submissions, make_source())
 
     assert submissions == original
+
+
+def test_ticker_resolution_finds_an_exact_match() -> None:
+    assert normalize_cik_from_ticker(load_company_tickers(), "ASML") == "937966"
+
+
+@pytest.mark.parametrize("ticker", ["nvda", "Nvda", "  NVDA  "])
+def test_ticker_resolution_is_case_insensitive_and_trims_whitespace(
+    ticker: str,
+) -> None:
+    assert normalize_cik_from_ticker(load_company_tickers(), ticker) == "1045810"
+
+
+def test_ticker_resolution_rejects_an_unknown_ticker() -> None:
+    with pytest.raises(EdgarNormalizationError, match="no CIK found"):
+        normalize_cik_from_ticker(load_company_tickers(), "NOSUCHTICKER")
+
+
+@pytest.mark.parametrize("ticker", ["", "   "])
+def test_ticker_resolution_rejects_a_blank_ticker(ticker: str) -> None:
+    with pytest.raises(EdgarNormalizationError, match="ticker must not be blank"):
+        normalize_cik_from_ticker(load_company_tickers(), ticker)
+
+
+@pytest.mark.parametrize("payload", [[], "ASML", None, {"0": "not an object"}])
+def test_ticker_resolution_rejects_malformed_entries_but_keeps_searching(
+    payload: object,
+) -> None:
+    if isinstance(payload, dict):
+        with pytest.raises(EdgarNormalizationError, match="no CIK found"):
+            normalize_cik_from_ticker(payload, "ASML")
+    else:
+        with pytest.raises(EdgarNormalizationError, match="must be an object"):
+            normalize_cik_from_ticker(payload, "ASML")
+
+
+def test_ticker_resolution_rejects_an_invalid_cik_str_on_the_matched_entry() -> None:
+    payload = {"0": {"ticker": "ASML", "cik_str": "not-a-number"}}
+
+    with pytest.raises(EdgarNormalizationError, match="invalid cik_str"):
+        normalize_cik_from_ticker(payload, "ASML")
+
+
+def test_ticker_resolution_accepts_a_string_cik_str_and_strips_leading_zeros() -> None:
+    payload = {"0": {"ticker": "ASML", "cik_str": "0000937966"}}
+
+    assert normalize_cik_from_ticker(payload, "ASML") == "937966"
+
+
+def test_ticker_resolution_does_not_mutate_the_supplied_payload() -> None:
+    payload = load_company_tickers()
+    original = deepcopy(payload)
+
+    normalize_cik_from_ticker(payload, "ASML")
+
+    assert payload == original

@@ -11,6 +11,7 @@ from pydantic import HttpUrl
 
 from equity_research_agent.data.providers.edgar import (
     ARCHIVES_BASE_URL,
+    normalize_cik_from_ticker,
     normalize_latest_annual_report,
 )
 from equity_research_agent.models.filings import FilingReference, RetrievedFiling
@@ -34,6 +35,7 @@ class EdgarFilingProvider:
     """
 
     _BASE_URL = "https://data.sec.gov/submissions"
+    _COMPANY_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
     _MINIMUM_REQUEST_INTERVAL_SECONDS = 0.15
     _ALLOWED_DOCUMENT_CONTENT_TYPES = frozenset({"text/html", "text/plain"})
 
@@ -89,6 +91,30 @@ class EdgarFilingProvider:
             retrieved_at=datetime.now(timezone.utc),
         )
         return normalize_latest_annual_report(payload, source)
+
+    def resolve_cik(self, ticker: str) -> str:
+        """Return the CIK for a listed ticker using SEC's company tickers file.
+
+        Matching is exact and case-insensitive. Unlike a filing, the resolved
+        CIK is not itself a citable fact, so this returns a plain string rather
+        than a sourced domain object.
+        """
+
+        self._wait_until_request_allowed()
+        request = Request(
+            self._COMPANY_TICKERS_URL,
+            headers={"User-Agent": self._user_agent, "Accept": "application/json"},
+        )
+        try:
+            with urlopen(request, timeout=self._timeout_seconds) as response:
+                response_body = response.read()
+            payload = json.loads(response_body.decode("utf-8"))
+        except (HTTPError, URLError, UnicodeDecodeError, JSONDecodeError):
+            raise EdgarProviderError(
+                "could not retrieve a valid EDGAR company tickers response"
+            ) from None
+
+        return normalize_cik_from_ticker(payload, ticker)
 
     def get_document(self, filing: FilingReference) -> RetrievedFiling:
         """Return the filing's primary document as sourced, untrusted text."""
