@@ -46,12 +46,21 @@ Completed after V0:
 - [x] Feeding the disclosed-risk analysis into the Research Synthesizer as an
   optional fourth prior analysis, alongside Business, Bear, and Financial
   Quality
+- [x] Deterministic filing chunking (`FilingChunk`, `chunk_filing_sections`)
+- [x] `EmbeddingProvider` protocol and a Voyage AI adapter (plain HTTP)
+- [x] In-memory vector store with cosine-similarity retrieval
+- [x] Live validation of chunking, embedding, and retrieval against a real,
+  current filing — see `HANDOFF.md` for the measured findings and the two
+  gaps it surfaced (a Voyage trial rate limit, and a Risk Factors
+  section-selection gap against this year's real ASML filing structure)
 
 The research workflow now resolves a filing-derived Disclosed Risk analysis
 for every ticker, renders it as its own report section, and — when
-available — feeds it into the final Research Synthesis. No implementation
-slice is currently active. The roadmap does not select or begin the next one
-automatically.
+available — feeds it into the final Research Synthesis. Separately, the
+deterministic chunking → embedding → in-memory retrieval building blocks for
+Phase 2.5 now exist and are live-validated, but have no consumer yet: no
+analyst or pipeline calls them. No implementation slice is currently active.
+The roadmap does not select or begin the next one automatically.
 
 Live CLI runs are reserved for bug investigation or after several new features
 have accumulated. Unit, integration, lint, and type checks are the default
@@ -254,6 +263,22 @@ Planned slices include:
   filtering;
 - retrieval evaluation against known filing evidence;
 - analyst contexts that treat retrieved text as data, not instructions.
+
+### Completed: chunking, embedding provider, and in-memory retrieval
+
+The deterministic core of the pipeline above: `chunk_filing_sections` splits
+each already-identified `FilingSection` into overlapping, word-boundary-
+aligned `FilingChunk`s; a protocol-based `EmbeddingProvider` and a Voyage AI
+adapter (plain HTTP, no SDK) turn chunk text into vectors; and an
+`InMemoryVectorStore` scores every stored vector against a query by cosine
+similarity, brute-force, with no ANN index — matching the anti-overengineering
+rule below. Live-validated against ASML's actual current Form 20-F: the
+mechanics (chunk sizing, vector ordering, retrieval ranking) held up, but the
+validation surfaced two real gaps outside this slice's scope, left
+deliberately unfixed — see `HANDOFF.md`'s "Measured Chunking/
+Embedding/Retrieval Findings" for both. No analyst or pipeline consumes this
+yet; that is the next candidate slice ("a real consumer" in the original
+breakdown), not yet selected.
 
 Introduce technologies only when their boundary is useful:
 

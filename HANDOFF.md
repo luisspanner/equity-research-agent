@@ -1,6 +1,6 @@
 # Project Handoff
 
-Last updated: 2026-08-21
+Last updated: 2026-08-22
 
 ## Current State
 
@@ -423,6 +423,67 @@ of both.
   real semantic heading tags instead. Nothing here should be read as "all
   10-Ks look like this."
 
+## Measured Chunking/Embedding/Retrieval Findings
+
+Commit `04ac7f4` — chunking, embedding provider, and in-memory vector
+retrieval, live-validated.
+
+Slice 4 of Phase 2.5 ("measured validation") ran chunking, Voyage AI
+embeddings, and cosine-similarity retrieval live against ASML's current Form
+20-F (accession `0000937966-26-000008`, filed 2026-02-25, period end
+2025-12-31, 24,864,615 bytes, 2,854 raw sections after sectioning) via a
+throwaway validation script, not committed to the repo. Findings:
+
+- **Chunking, embedding, and retrieval mechanics themselves check out.** With
+  `chunk_size=1500, overlap=200`, word-boundary-aligned chunks stayed within
+  size, `VoyageEmbeddingProvider` returned 1024-dimension `voyage-4` vectors
+  in the requested order, and `InMemoryVectorStore.search` correctly ranked
+  the topically closest chunk highest with a clear margin over noise — e.g. a
+  financial-risk query scored the real financial-risks chunk at 0.590 versus
+  0.336 for the next-closest unrelated chunk. Nothing here required a code
+  change.
+- **The Voyage trial account is rate-limited to 3 requests/minute.** Confirmed
+  via a direct, isolated call returning `HTTP 429` with an explicit message:
+  no payment method is on file for the account, capping it at 3 RPM / 10K TPM
+  until one is added (free-tier tokens still apply afterward). Any validation
+  or future production run issuing more than ~3 embedding calls/minute will
+  hit this without warning — not a bug in this project's code, but worth
+  knowing before wiring embeddings into a real request path.
+- **`select_risk_factors_section` does not deliver usable content against
+  this real, current filing.** The Item 3.D anchor it selects
+  (`i1edf02a2dc3144cf83a1843d2038ab4e_214`) resolves to only 1,070 characters
+  of category-listing boilerplate ("The risk factors outlined in this section
+  are categorized into the following types: Strategic, Operations, Finance
+  and…"), not the actual risk narratives. This selector was previously
+  validated only against curated excerpt fixtures (see the ASML/NVIDIA
+  findings above); this is the first time it has been measured against a
+  full, current, live filing, and the result is a real gap, not a chunking or
+  embedding problem.
+- **The real risk narratives exist, but are scattered across dozens of small,
+  independently anchored spans elsewhere in the document**, not under the
+  Item 3.D anchor at all — e.g. customer-concentration risk was found inside
+  the `.text` of an anchor labelled "We depend on our ability to manage the
+  growth of our organization…" (5,982 characters), and AI-related risk under
+  a separate anchor entirely. This filer appears to render its risk
+  disclosures as an interactive, per-topic card/matrix structure this year,
+  a materially different shape from the reference-table-driven sectioning the
+  existing sectioner was built and tested against.
+- **At least one index row produces an anomalously long `label`.** One entry
+  for anchor `i1edf02a2dc3144cf83a1843d2038ab4e_445` ("Impact, risk and
+  opportunity management") carries a 5,599-character label — several
+  concatenated table cells' worth of text rather than a short caption — while
+  a second index row citing the *same* anchor carries the expected short
+  39-character label. Confirms the sectioner's documented behavior that one
+  target can be cited by more than one row with different labels, but the
+  5,599-character case suggests `_clean_label`'s cell-joining heuristic can
+  ingest far more than a caption on this filer's row shapes.
+- **Not fixed.** Both the rate limit and the section-selection gap are
+  outside this slice's scope (chunking/embedding/retrieval validation, not
+  filing sectioning or Risk Factors selection) and were left untouched. They
+  are candidates for a dedicated future slice if Risk Factors retrieval
+  quality against current, real filings becomes the next priority — see
+  Known Limitations.
+
 ## Current / Next Slice
 
 No implementation slice is currently active. Filing sectioning, Risk Factors
@@ -432,9 +493,21 @@ Synthesizer, described in "Completed Filing-Ingestion Slices" above, are all
 implemented. Mechanism details are recorded there rather than repeated here,
 to avoid drifting out of sync with the code as it evolves.
 
+Separately, deterministic chunking (`filings/chunking.py`), the
+`EmbeddingProvider` protocol and Voyage AI adapter (`embeddings/voyage.py`),
+and the in-memory vector store (`embeddings/store.py`) are implemented and
+live-validated — see "Measured Chunking/Embedding/Retrieval Findings" above.
+Nothing calls them yet: they exist as standalone building blocks with no
+analyst or pipeline consumer.
+
 ### Explicitly Out of Scope (carried out of the completed slices)
 
-- chunking, embeddings, retrieval, RAG, pgvector, PostgreSQL, FastAPI, Docker;
+- wiring chunking/embedding/retrieval into any analyst or pipeline, RAG
+  metadata filtering, retrieval evaluation, pgvector, PostgreSQL, FastAPI,
+  Docker;
+- fixing `select_risk_factors_section` against the real-filing gap the
+  Measured Chunking/Embedding/Retrieval Findings section surfaced;
+- adding a payment method to the Voyage account to lift its 3 RPM trial cap;
 - fuzzy or partial ticker matching, and caching the ticker-to-CIK table across
   calls;
 - a second filing-derived analyst, or generalizing "one section in, one
@@ -519,6 +592,21 @@ to avoid drifting out of sync with the code as it evolves.
   of NVIDIA's real 10-K Table of Contents, two of the empty marker divs it
   links to, and the content following each; used by
   `test_filing_sectioning.py` as a second-filer comparison
+- `src/equity_research_agent/models/filings.py` — also defines `FilingChunk`,
+  the retrievable-window contract with provenance back to its owning
+  `FilingSection`
+- `src/equity_research_agent/filings/chunking.py` — `chunk_filing_sections`,
+  pure word-boundary-aligned windowing within one section at a time
+- `src/equity_research_agent/embeddings/protocol.py` — `EmbeddingProvider`
+  protocol and the `EmbeddingInputType` query/document distinction
+- `src/equity_research_agent/embeddings/voyage.py` — `VoyageEmbeddingProvider`,
+  plain-HTTP Voyage AI adapter, default model `voyage-4`
+- `src/equity_research_agent/embeddings/store.py` — `cosine_similarity` and
+  `InMemoryVectorStore`, brute-force cosine search over a list of
+  `(FilingChunk, vector)` pairs
+- `tests/test_filing_chunking.py`, `tests/test_voyage_embeddings.py`,
+  `tests/test_vector_store.py` — unit tests for the three modules above, all
+  using fakes/hand-written vectors; no live network calls in the test suite
 
 ## Important Architectural Decisions
 
@@ -648,8 +736,22 @@ bug investigation or for validating several accumulated features.
   second provider still requires explicit adapters.
 - Retrieved documents are held in memory only. Nothing is cached or persisted,
   so a second run refetches the same immutable filing.
-- Filing sections are produced but never chunked, embedded, or searched, and
-  no RAG capability exists.
+- Filing sections can now be chunked, embedded, and searched
+  (`chunk_filing_sections`, `VoyageEmbeddingProvider`,
+  `InMemoryVectorStore`), but no analyst or pipeline calls any of it yet —
+  the building blocks exist with no consumer.
+- The Voyage AI account currently in use is rate-limited to 3 requests/minute
+  and 10K tokens/minute (no payment method on file). Any future workload
+  issuing more than a few embedding calls/minute will hit `HTTP 429`
+  silently unless a payment method is added first. See the Measured
+  Chunking/Embedding/Retrieval Findings above.
+- `select_risk_factors_section` does not deliver usable content against
+  ASML's real, current Form 20-F: the Item 3.D anchor it selects resolves to
+  ~1KB of category-listing boilerplate, not the actual risk narratives,
+  which are scattered across dozens of separate small anchors elsewhere in
+  the document. Previously validated only against curated excerpt fixtures;
+  this is a real gap measured against a live filing, not yet fixed. See the
+  Measured Chunking/Embedding/Retrieval Findings above.
 - The Disclosed Risk Analyst reads exactly one section per call. There is no
   batch entry point for many sections; wiring it into `run_research` invokes
   it once, for the one filing and one section the pipeline selects.
@@ -765,17 +867,42 @@ bug investigation or for validating several accumulated features.
   filing-disclosed risks?~~ Decided and implemented: `ResearchSynthesizer`
   takes the analysis as an optional fourth prior analysis and merges its
   sources; the prompt is unchanged when it is unavailable.
+- ~~What chunk size and overlap should `chunk_filing_sections` use?~~ Decided
+  and implemented: 1500 characters with 200 overlap, word-boundary aligned,
+  as a reasonable starting default. Not re-tuned against the retrieval
+  quality observed in the live validation; the ranking was directionally
+  correct but the section-selection gap makes chunk-size tuning premature
+  until the sectioner supplies better input to chunk.
+- Now that chunking, embedding, and retrieval all exist and are
+  live-validated, what is the real consumer? Not yet decided. Candidates:
+  wiring retrieval into the existing Disclosed Risk Analyst as a fallback
+  when `select_risk_factors_section` is unavailable; a new analyst that
+  queries across all of a filing's chunks rather than one pre-selected
+  section; or fixing `select_risk_factors_section` itself first, since a
+  better-selected section may make retrieval unnecessary for Risk Factors
+  specifically and only needed for sections without a deterministic
+  selector.
+- Should `select_risk_factors_section` be fixed to handle the card/matrix
+  structure measured on ASML's current filing, or should retrieval (now that
+  it exists) become the fallback path for filings whose structure defeats
+  deterministic selection? Not yet decided; both are plausible responses to
+  the same measured finding.
 
 ## Next Expected Steps
 
 No slice is currently selected. The Disclosed Risk Analyst is wired into
 `run_research`, the CLI, and the Research Synthesizer, so filing ingestion now
-has a real consumer both in the report and in the final synthesis. Candidates
-for a future slice include: a second filing-derived analyst with its own
-distinct evidence boundary; caching the ticker-to-CIK table or retrieved
-documents; populating `SecurityIdentity.cik` from `resolve_cik`; or
-non-filing roadmap work (valuation, persistence). The roadmap does not choose
-the next one automatically.
+has a real consumer both in the report and in the final synthesis. Separately,
+chunking, embedding, and in-memory retrieval are implemented and
+live-validated but have no consumer yet. Candidates for a future slice
+include: a real consumer for chunking/embedding/retrieval (see Open
+Questions); fixing `select_risk_factors_section` against the real-filing gap
+measured this session; adding a Voyage payment method to lift the 3 RPM trial
+cap; a second filing-derived analyst with its own distinct evidence boundary;
+caching the ticker-to-CIK table or retrieved documents; populating
+`SecurityIdentity.cik` from `resolve_cik`; or non-filing roadmap work
+(valuation, persistence). The roadmap does not choose the next one
+automatically.
 
 ## Cross-Agent Handoff
 
