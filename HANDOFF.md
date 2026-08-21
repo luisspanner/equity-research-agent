@@ -596,7 +596,7 @@ to avoid drifting out of sync with the code as it evolves.
 Freshly verified locally on 2026-08-21 after feeding the disclosed-risk
 analysis into the Research Synthesizer. Wiring the Disclosed Risk Analyst
 into `run_research` is committed at `aefcb43` (docs correction at `bd95807`);
-this Synthesizer-integration slice is staged locally, not yet committed:
+this Synthesizer-integration slice is committed at `824b85b`:
 
 - `uv run pytest`: 559 passed
 - `uv run ruff check`: passed
