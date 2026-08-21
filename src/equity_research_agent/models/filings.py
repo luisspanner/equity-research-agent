@@ -108,3 +108,21 @@ class SectionedFiling(DomainModel):
     filing: FilingReference
     sections: tuple[FilingSection, ...] = Field(min_length=1)
     sources: tuple[SourceReference, ...] = Field(min_length=1)
+
+
+class FilingChunk(DomainModel):
+    """One retrievable window of text from a single filing section.
+
+    Chunking runs within one already-identified ``FilingSection``, so a
+    chunk's provenance names both the filing and the section it was cut
+    from -- enough to trace a retrieved chunk back to a specific place in a
+    specific filing without re-deriving it from character offsets.
+    """
+
+    filing: FilingReference
+    section_label: NonEmptyString
+    section_anchor_id: NonEmptyString
+    item_identifier: NonEmptyString | None = None
+    chunk_index: int = Field(ge=0)
+    text: DocumentText
+    sources: tuple[SourceReference, ...] = Field(min_length=1)

@@ -128,6 +128,36 @@ While implementing:
 
 ---
 
+## Debugging Discipline
+
+When a command, test, or live run fails unexpectedly, diagnose before fixing.
+Do not retry the same or a slightly different fix repeatedly. Before changing
+any code, work through:
+
+1. **Exact observed failure** — quote the real error/stack trace/symptom, and
+   say what is directly observed versus inferred.
+2. **Expected behavior** — what contract, invariant, or test expectation is
+   being violated.
+3. **Execution path** — trace the causal chain from trigger to failure
+   through the actual functions/modules involved, not a vague summary.
+4. **Most likely root cause** — the underlying cause, with evidence from the
+   code or logs, not just the line where the error surfaces.
+5. **Alternative hypotheses** — other plausible causes, ranked, each with
+   supporting or contradicting evidence.
+6. **Unknowns** — state explicitly what is not yet known rather than
+   guessing; note what would resolve each unknown.
+7. **Verification** — confirm the leading hypothesis with a minimal
+   reproduction or targeted check before proposing a fix.
+
+Only then propose the smallest fix that addresses the root cause, note why it
+resolves the underlying issue rather than the symptom, and flag any
+regressions or adjacent systems worth checking afterward. If the fix touches
+files outside the current task's declared scope, treat it as discovered
+technical debt per the Core Development Principles: mention it, do not fix it
+automatically.
+
+---
+
 ## After Every Implementation
 
 After implementing the requested task:

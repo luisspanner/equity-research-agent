@@ -1,5 +1,6 @@
 """Processing of retrieved primary-source filings."""
 
+from equity_research_agent.filings.chunking import chunk_filing_sections
 from equity_research_agent.filings.disclosed_risk_pipeline import (
     DisclosedRiskAnalyst,
     DisclosedRiskPipelineResult,
@@ -28,6 +29,7 @@ __all__ = [
     "FilingTextExtractionError",
     "RiskFactorsSectionSelection",
     "RiskFactorsSectionUnavailableReason",
+    "chunk_filing_sections",
     "extract_filing_sections",
     "extract_filing_text",
     "resolve_disclosed_risk_analysis",
