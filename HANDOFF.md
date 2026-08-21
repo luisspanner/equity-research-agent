@@ -546,7 +546,7 @@ evolves.
 
 Freshly verified locally on 2026-08-21 after wiring the Disclosed Risk
 Analyst into `run_research`. Risk Factors section selection is committed at
-`73e915a`; this wiring slice is staged locally, not yet committed:
+`73e915a`; this wiring slice is committed at `aefcb43`:
 
 - `uv run pytest`: 555 passed
 - `uv run ruff check`: passed
