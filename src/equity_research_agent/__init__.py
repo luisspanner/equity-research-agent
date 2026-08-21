@@ -8,6 +8,7 @@ from typing import Protocol
 from equity_research_agent.agents import (
     GroqBearAnalyst,
     GroqBusinessAnalyst,
+    GroqDisclosedRiskAnalyst,
     GroqResearchSynthesizer,
 )
 from equity_research_agent.agents.financial_quality import (
@@ -20,7 +21,13 @@ from equity_research_agent.analytics.financial_risk import build_financial_risk_
 from equity_research_agent.analytics.metrics import assemble_financial_metrics
 from equity_research_agent.data.providers import (
     AlphaVantageProvider,
+    EdgarFilingProvider,
+    FilingProvider,
     FinancialDataProvider,
+)
+from equity_research_agent.filings import (
+    DisclosedRiskAnalyst,
+    resolve_disclosed_risk_analysis,
 )
 from equity_research_agent.models.bear_analysis import BearAnalysis
 from equity_research_agent.models.business_analysis import BusinessAnalysis
@@ -77,14 +84,19 @@ class ResearchSynthesizer(Protocol):
 def run_research(
     ticker: str,
     provider: FinancialDataProvider,
+    filing_provider: FilingProvider,
     business_analyst: BusinessAnalyst,
     bear_analyst: BearAnalyst,
     financial_quality_analyst: FinancialQualityAnalyst,
+    disclosed_risk_analyst: DisclosedRiskAnalyst,
     synthesizer: ResearchSynthesizer,
 ) -> str:
     """Run the V0 workflow and return its sourced Markdown research report."""
 
     profile = provider.get_company_profile(ticker)
+    disclosed_risk_result = resolve_disclosed_risk_analysis(
+        ticker, profile, filing_provider, disclosed_risk_analyst
+    )
     financials = provider.get_annual_financials(ticker)
     market_snapshot = provider.get_market_snapshot(ticker)
     metrics = assemble_financial_metrics(financials, market_snapshot)
@@ -111,6 +123,7 @@ def run_research(
         bear_analysis,
         financial_quality_analysis,
         synthesis,
+        disclosed_risk_result,
     )
 
 
@@ -127,12 +140,18 @@ def main(argv: Sequence[str] | None = None) -> None:
     if alpha_vantage_api_key is None:
         parser.error("ALPHA_VANTAGE_API_KEY environment variable is not set")
 
+    edgar_contact_user_agent = os.environ.get("EDGAR_CONTACT_USER_AGENT")
+    if edgar_contact_user_agent is None:
+        parser.error("EDGAR_CONTACT_USER_AGENT environment variable is not set")
+
     report = run_research(
         arguments.ticker,
         AlphaVantageProvider(alpha_vantage_api_key),
+        EdgarFilingProvider(edgar_contact_user_agent),
         GroqBusinessAnalyst.from_environment(),
         GroqBearAnalyst.from_environment(),
         GroqFinancialQualityAnalyst.from_environment(),
+        GroqDisclosedRiskAnalyst.from_environment(),
         GroqResearchSynthesizer.from_environment(),
     )
     print(report)

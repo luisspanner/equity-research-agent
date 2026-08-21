@@ -39,3 +39,6 @@ class FilingProvider(Protocol):
 
     def get_document(self, filing: FilingReference) -> RetrievedFiling:
         """Return the filing's primary document as sourced, untrusted text."""
+
+    def resolve_cik(self, ticker: str) -> str:
+        """Return the CIK for a listed ticker."""

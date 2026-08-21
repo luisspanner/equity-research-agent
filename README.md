@@ -124,10 +124,16 @@ plus final Synthesis through Groq, and prints a sourced Markdown research
 report. Financial-risk and Financial Quality findings retain source provenance
 through the workflow.
 
-Filing ingestion has begun separately: the project can discover an issuer's most
-recent SEC EDGAR annual report, retrieve its primary document as explicitly
-untrusted text, and extract that document into readable plain text. None of it
-is wired into the research workflow yet. See `HANDOFF.md` for current state.
+Filing ingestion is wired into that same workflow: for each ticker, the CLI
+resolves a CIK (preferring one Alpha Vantage already supplied, falling back to
+SEC EDGAR), fetches the issuer's latest 10-K or 20-F, sections it along the
+filer's own linking index, selects the Risk Factors section, and runs the
+Disclosed Risk Analyst on it. The report includes a "Disclosed Risks" section
+sourced at the filing-section level; when any step in that chain is not
+possible (no resolvable CIK, no annual report on file, or no uniquely
+identified Risk Factors section), the report states the specific reason
+instead of silently omitting the section or failing the whole run. See
+`HANDOFF.md` for current state.
 
 ## Running V0
 
@@ -136,7 +142,11 @@ Add the following keys to the local, git-ignored `.env` file:
 ```dotenv
 ALPHA_VANTAGE_API_KEY=your_alpha_vantage_key
 GROQ_API_KEY=your_groq_key
+EDGAR_CONTACT_USER_AGENT=Your Name your_email@example.com
 ```
+
+`EDGAR_CONTACT_USER_AGENT` is the contact string SEC EDGAR requires on every
+request; it is not a secret and can be your name and email address.
 
 Load them into your shell, then provide one ticker:
 

@@ -5,12 +5,23 @@ from decimal import Decimal
 
 from pydantic import HttpUrl
 
+from equity_research_agent.filings.disclosed_risk_pipeline import (
+    DisclosedRiskPipelineResult,
+    DisclosedRiskUnavailableReason,
+)
+from equity_research_agent.filings.risk_factors import (
+    RiskFactorsSectionUnavailableReason,
+)
 from equity_research_agent.models.bear_analysis import BearAnalysis, BearRisk
 from equity_research_agent.models.business_analysis import (
     BusinessAnalysis,
     BusinessAnalysisEvidence,
 )
 from equity_research_agent.models.company import CompanyProfile, SecurityIdentity
+from equity_research_agent.models.disclosed_risk_analysis import (
+    DisclosedRisk,
+    DisclosedRiskAnalysis,
+)
 from equity_research_agent.models.financial_quality import (
     FinancialQualityAnalysis,
     FinancialQualityEvidence,
@@ -166,7 +177,42 @@ def make_synthesis() -> ResearchSynthesis:
     )
 
 
-def render_fixture_report() -> str:
+def make_disclosed_risk_source() -> SourceReference:
+    """Create provenance for a filing section, distinct from the profile source."""
+
+    return SourceReference(
+        provider="sec_edgar",
+        source_type="filing_section",
+        source_id="0000000000-26-000000:risks",
+        url=HttpUrl(
+            "https://www.sec.gov/Archives/edgar/data/1/000000000026000000/"
+            "test-20251231.htm#risks"
+        ),
+        captured_on=date(2026, 2, 25),
+    )
+
+
+def make_disclosed_risk_result() -> DisclosedRiskPipelineResult:
+    """Create an available filing-derived disclosed-risk result."""
+
+    source = make_disclosed_risk_source()
+    return DisclosedRiskPipelineResult(
+        analysis=DisclosedRiskAnalysis(
+            disclosed_risks=(
+                DisclosedRisk(
+                    risk="Regulatory changes could restrict product exports.",
+                    source_ids=(source.source_id,),
+                ),
+            ),
+            limitations=("The section covers only export-control risk factors.",),
+            sources=(source,),
+        )
+    )
+
+
+def render_fixture_report(
+    disclosed_risk_result: DisclosedRiskPipelineResult | None = None,
+) -> str:
     """Render one complete report from stable, representative input fixtures."""
 
     return render_research_report(
@@ -176,6 +222,9 @@ def render_fixture_report() -> str:
         make_bear_analysis(),
         make_financial_quality_analysis(),
         make_synthesis(),
+        disclosed_risk_result
+        if disclosed_risk_result is not None
+        else make_disclosed_risk_result(),
     )
 
 
@@ -237,6 +286,7 @@ def test_render_report_omits_empty_financial_quality_finding_headings() -> None:
         make_bear_analysis(),
         analysis,
         make_synthesis(),
+        make_disclosed_risk_result(),
     )
 
     assert "### Overall Assessment" in report
@@ -246,3 +296,53 @@ def test_render_report_omits_empty_financial_quality_finding_headings() -> None:
 
 def test_render_report_is_deterministic_for_identical_inputs() -> None:
     assert render_fixture_report() == render_fixture_report()
+
+
+def test_render_report_includes_disclosed_risks_when_available() -> None:
+    report = render_fixture_report()
+
+    assert "## Disclosed Risks (Filing Interpretation)" in report
+    assert (
+        "Regulatory changes could restrict product exports. "
+        "[0000000000-26-000000:risks]" in report
+    )
+    assert "The section covers only export-control risk factors." in report
+    assert "[0000000000-26-000000:risks]" in report
+
+
+def test_render_report_merges_disclosed_risk_sources_into_consolidated_sources() -> (
+    None
+):
+    report = render_fixture_report()
+
+    sources_section = report.split("## Sources")[1]
+    assert "0000000000-26-000000:risks" in sources_section
+    assert "TEST-overview" in sources_section
+
+
+def test_render_report_states_disclosed_risk_unavailable_reason() -> None:
+    unavailable = DisclosedRiskPipelineResult(
+        unavailable_reason=DisclosedRiskUnavailableReason.CIK_UNRESOLVED
+    )
+    report = render_fixture_report(unavailable)
+
+    assert "## Disclosed Risks (Filing Interpretation)" in report
+    assert "Not available — cik unresolved" in report
+    assert "0000000000-26-000000:risks" not in report
+
+
+def test_render_report_states_specific_risk_factors_unavailable_reason() -> None:
+    unavailable = DisclosedRiskPipelineResult(
+        unavailable_reason=(
+            DisclosedRiskUnavailableReason.RISK_FACTORS_SECTION_UNAVAILABLE
+        ),
+        risk_factors_reason=(
+            RiskFactorsSectionUnavailableReason.EXPECTED_ITEM_NOT_FOUND
+        ),
+    )
+    report = render_fixture_report(unavailable)
+
+    assert (
+        "Not available — risk factors section unavailable "
+        "(expected item not found)" in report
+    )

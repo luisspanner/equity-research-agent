@@ -1,13 +1,14 @@
 # Project Handoff
 
-Last updated: 2026-08-20
+Last updated: 2026-08-21
 
 ## Current State
 
 The project has a working CLI research pipeline. Given a ticker, it retrieves a
 company profile, normalized annual financial statements, and a market snapshot
 from Alpha Vantage; calculates core financial metrics in deterministic Python;
-runs source-bounded Business, Bear, and Financial Quality Analysts plus Research
+resolves a filing-derived disclosed-risk analysis from SEC EDGAR; runs
+source-bounded Business, Bear, and Financial Quality Analysts plus Research
 Synthesis through Groq; and renders a sourced Markdown report.
 
 The Bear Analyst receives a provenance-aware financial-risk context. The
@@ -15,16 +16,22 @@ Financial Quality Analyst is fully integrated into workflow orchestration,
 Synthesis, and reporting, and its findings are validated against the exact
 deterministic metrics and source IDs they cite.
 
-Separately from that pipeline, the project can resolve a ticker to its SEC
-CIK, discover an issuer's most recent annual report on SEC EDGAR, retrieve its
-primary document as untrusted text, extract that document into readable plain
-text, and divide it into labelled, possibly overlapping sections along the
-filer's own linking index. Where that index exposes measured form-item
-metadata, it can deterministically select the unique disclosed-risk section:
-10-K Item 1A or 20-F Item 3.D. A Disclosed Risk Analyst can turn that one
-section into a source-validated LLM analysis, the first analyst in the project
-that reads raw filing prose rather than already-normalized data. None of these
-capabilities is wired into the research workflow.
+Filing ingestion is now wired into `run_research`. For each ticker,
+`resolve_disclosed_risk_analysis` resolves a CIK (preferring one Alpha Vantage
+already supplied, falling back to SEC EDGAR's ticker resolution), fetches the
+issuer's most recent annual report, retrieves its primary document as
+untrusted text, sections it along the filer's own linking index, selects the
+unique Risk Factors section (10-K Item 1A or 20-F Item 3.D), and runs the
+Disclosed Risk Analyst on it. This is the first analyst in the project that
+reads raw filing prose rather than already-normalized data. Every step that
+can fail for an ordinary, expected reason (no resolvable CIK, no annual report
+on file, a filing shape sectioning cannot read, no uniquely identified Risk
+Factors section) returns a typed unavailable result instead of raising, so a
+filing-side gap does not fail the whole research run; the report states the
+specific reason instead. Genuine provider or transport failures still
+propagate and fail the run, unchanged from every other provider call in the
+workflow. The Markdown report renders the result as a new "Disclosed Risks"
+section and merges its sources into the report's consolidated source list.
 
 ## Completed Filing-Ingestion Slices
 
@@ -179,6 +186,62 @@ for the Disclosed Risk Analyst.
   variation, absent/incorrect metadata, and ambiguity cases. It does not
   retrieve, invoke a model, or wire filing analysis into the workflow.
 
+Wiring the Disclosed Risk Analyst into `run_research` — the first slice to
+connect filing ingestion to the research workflow and its report.
+
+- `resolve_disclosed_risk_analysis` (`filings/disclosed_risk_pipeline.py`) is
+  the new orchestration function: CIK resolution → `get_latest_annual_report`
+  → `get_document` → `extract_filing_sections` → `select_risk_factors_section`
+  → `DisclosedRiskAnalyst.analyze`. It composes only capabilities that already
+  existed separately; no filing-processing logic changed.
+- **CIK policy**: prefer `profile.security.cik` when Alpha Vantage already
+  supplied one; call `EdgarFilingProvider.resolve_cik(ticker)` only when it is
+  absent. Chosen to avoid an extra EDGAR request in the common case rather
+  than always resolving through SEC or requiring both to agree.
+- **Failure behavior**: `DisclosedRiskPipelineResult` carries either an
+  analysis or a `DisclosedRiskUnavailableReason` — `CIK_UNRESOLVED`,
+  `ANNUAL_REPORT_NOT_FOUND`, `FILING_NOT_SECTIONABLE`, or
+  `RISK_FACTORS_SECTION_UNAVAILABLE` — following the same frozen-dataclass,
+  exactly-one-of pattern `RiskFactorsSectionSelection` established. These four
+  reasons map to `EdgarNormalizationError` from `resolve_cik` or
+  `get_latest_annual_report`, `FilingSectioningError`, and a non-available
+  `RiskFactorsSectionSelection` respectively — each an *expected* evidence gap,
+  not a defect. `RISK_FACTORS_SECTION_UNAVAILABLE` additionally carries the
+  original `RiskFactorsSectionUnavailableReason` in `risk_factors_reason`
+  rather than collapsing it, so the more specific reason is not lost.
+  `EdgarProviderError` (network/transport failure from any provider call,
+  including `get_document`, which raises no other exception type) is not
+  caught anywhere in the pipeline and propagates to fail the whole research
+  run, matching how every other provider call in `run_research` already
+  behaves on a genuine failure.
+- `FilingProvider` gained `resolve_cik(self, ticker: str) -> str` on its
+  Protocol (`data/providers/base.py`) so the pipeline can depend on the
+  abstract provider type rather than the concrete `EdgarFilingProvider`.
+  `EdgarFilingProvider` already implemented this method, so no provider code
+  changed.
+- `render_research_report` gained a required `disclosed_risk_result`
+  parameter and a new "Disclosed Risks (Filing Interpretation)" section,
+  placed after Bear Case. When unavailable, it renders the specific reason
+  (e.g. "risk factors section unavailable (expected item not found)") instead
+  of omitting the section. When available, the analysis's sources are merged
+  into the report's consolidated Sources list via the existing
+  `merge_source_references`, computed at render time rather than by asking
+  the Research Synthesizer to know about filing evidence — the Disclosed Risk
+  Analyst is not fed into Synthesis in this slice; it renders as its own,
+  independent report section.
+- `main()` requires a new `EDGAR_CONTACT_USER_AGENT` environment variable (the
+  contact string SEC EDGAR requires, not a secret) to construct
+  `EdgarFilingProvider`, alongside the existing `ALPHA_VANTAGE_API_KEY` and
+  `GROQ_API_KEY`.
+- Tested with fakes only (`tests/test_disclosed_risk_pipeline.py`): every
+  branch of the CIK policy, every unavailable reason, transport-failure
+  propagation at each provider call, and the happy path invoking the analyst
+  with the selected section. `tests/test_markdown_report.py` and
+  `tests/test_cli.py` extended for the new report section and workflow
+  parameters. No new live EDGAR fetch was needed; this slice recombines
+  already-validated capabilities rather than adding new filing-structure
+  handling.
+
 ## Measured Filing-Structure Findings
 
 Carry these forward. They were measured against ASML's 2025 Form 20-F
@@ -321,19 +384,18 @@ of both.
 
 ## Current / Next Slice
 
-No implementation slice is currently active. Filing sectioning, the Disclosed
-Risk Analyst, and ticker-to-CIK resolution, described in "Completed
-Filing-Ingestion Slices" above, are all implemented. Mechanism details are
-recorded there rather than repeated here, to avoid drifting out of sync with
-the code as it evolves.
+No implementation slice is currently active. Filing sectioning, Risk Factors
+selection, ticker-to-CIK resolution, the Disclosed Risk Analyst, and its
+wiring into `run_research`/the CLI, described in "Completed Filing-Ingestion
+Slices" above, are all implemented. Mechanism details are recorded there
+rather than repeated here, to avoid drifting out of sync with the code as it
+evolves.
 
 ### Explicitly Out of Scope (carried out of the completed slices)
 
 - chunking, embeddings, retrieval, RAG, pgvector, PostgreSQL, FastAPI, Docker;
-- wiring the Disclosed Risk Analyst, or any filing capability, into
-  `run_research` or the CLI, and populating `SecurityIdentity.cik` from
-  `resolve_cik` — no longer blocked on missing ticker-to-CIK resolution, but
-  not yet selected as a slice;
+- feeding the Disclosed Risk Analyst's output into the Research Synthesizer —
+  it renders as its own independent report section, not as synthesis input;
 - fuzzy or partial ticker matching, and caching the ticker-to-CIK table across
   calls;
 - a second filing-derived analyst, or generalizing "one section in, one
@@ -371,8 +433,16 @@ the code as it evolves.
   established prompt/adapter split this analyst follows
 - `src/equity_research_agent/models/provenance.py` — source-reference model and
   merge behavior
-- `src/equity_research_agent/__init__.py` — current workflow composition; does
-  not yet call any filing-derived analyst
+- `src/equity_research_agent/filings/disclosed_risk_pipeline.py` — orchestrates
+  CIK resolution through Disclosed Risk Analyst invocation into one typed
+  result; the new consumer of every other filing-ingestion slice
+- `src/equity_research_agent/__init__.py` — current workflow composition;
+  calls `resolve_disclosed_risk_analysis` and passes its result to the report
+- `src/equity_research_agent/reports/markdown.py` — renders the Disclosed
+  Risks report section and merges its sources into the consolidated list
+- `tests/test_disclosed_risk_pipeline.py` — fake-provider tests for every
+  pipeline branch: CIK policy, each unavailable reason, transport-failure
+  propagation, and the happy path
 - `tests/` — executable behavior and established testing conventions
 - `tests/test_edgar_normalizer.py` — includes `normalize_cik_from_ticker` tests
   against a recorded, trimmed `company_tickers.json` excerpt
@@ -448,17 +518,39 @@ the code as it evolves.
 - Extract shared infrastructure only after duplication is demonstrated. Keep
   analyst-specific prompts, output models, and evidence contracts explicit
   where they encode different semantics.
+- CIK resolution for filing lookups prefers a profile-supplied CIK and falls
+  back to SEC resolution only when it is absent, to avoid an extra EDGAR
+  request in the common case rather than always resolving through SEC or
+  requiring both sources to agree.
+- Expected evidence gaps (no resolvable CIK, no annual report on file, an
+  unsectionable filing, no unique Risk Factors section) become typed
+  unavailable results, never exceptions; only genuine provider or transport
+  failures propagate and fail a research run. This is the same distinction
+  `select_risk_factors_section` already drew between missing/ambiguous
+  metadata and a hard failure, now applied one level up at the pipeline that
+  calls it.
+- The Disclosed Risk Analyst's output is not fed into the Research
+  Synthesizer. It renders as its own report section with its sources merged
+  into the report's consolidated list at render time, deterministically in
+  code — the Synthesizer does not need to know about filing evidence to keep
+  the report fully sourced.
+- `FilingProvider.resolve_cik` is part of the Protocol, not just the concrete
+  `EdgarFilingProvider`, so workflow code can depend on the abstract provider
+  type. The pipeline function still imports `EdgarNormalizationError`
+  directly from the EDGAR-specific normalizer module to distinguish an
+  expected "not found" from a transport failure; with only one filing
+  provider implemented, this is a deliberate, minor coupling rather than a
+  provider-neutral exception hierarchy that nothing yet requires.
 
 ## Verification Status
 
-Freshly verified locally on 2026-08-20 after the structural Risk Factors
-section-selection slice. Filing sectioning is committed at `f7ed519`; the
-Disclosed Risk Analyst is committed at `6284e94`; ticker-to-CIK resolution is
-committed at `4919f56`:
+Freshly verified locally on 2026-08-21 after wiring the Disclosed Risk
+Analyst into `run_research`. Risk Factors section selection is committed at
+`73e915a`; this wiring slice is staged locally, not yet committed:
 
-- `uv run pytest`: 538 passed
+- `uv run pytest`: 555 passed
 - `uv run ruff check`: passed
-- `uv run mypy`: passed for configured `src` (46 files)
+- `uv run mypy`: passed for configured `src` (47 files)
 - `git diff --check`: passed
 
 Automated checks make no live provider or model calls; EDGAR behavior is
@@ -492,14 +584,10 @@ bug investigation or for validating several accumulated features.
 - Filing discovery reads only the `filings.recent` block of the EDGAR
   submissions index. An issuer whose latest annual report has aged out of that
   block raises rather than returning an older filing.
-- Filing discovery takes a CIK. Ticker-to-CIK resolution now exists
-  (`EdgarFilingProvider.resolve_cik`), but nothing calls it yet:
-  Alpha Vantage populates `SecurityIdentity.cik` when its overview supplies
-  one, but the workflow neither uses that value for EDGAR nor falls back to
-  SEC resolution when it is missing. Nothing in the research workflow calls
-  `EdgarFilingProvider` at all.
 - `resolve_cik` fetches and parses the full ~800 KB `company_tickers.json` on
-  every call; there is no caching across calls within or between runs.
+  every call; there is no caching across calls within or between runs. Every
+  `run_research` call for a ticker Alpha Vantage did not supply a CIK for now
+  pays this cost.
 - `resolve_cik` does exact, case-insensitive matching only. A ticker not
   present verbatim in SEC's file (e.g. a class-share suffix rendered
   differently than expected) resolves to nothing rather than a best guess.
@@ -513,9 +601,20 @@ bug investigation or for validating several accumulated features.
 - Filing sections are produced but never chunked, embedded, or searched, and
   no RAG capability exists.
 - The Disclosed Risk Analyst reads exactly one section per call. There is no
-  batch entry point for many sections, and it is not wired into `run_research`
-  or the CLI. Ticker-to-CIK resolution exists, but the integration's CIK
-  policy and failure behaviour are still unselected.
+  batch entry point for many sections; wiring it into `run_research` invokes
+  it once, for the one filing and one section the pipeline selects.
+- The Disclosed Risk Analyst's output is not fed into the Research
+  Synthesizer. It renders as its own report section; the investment thesis,
+  risk summary, and open questions the Synthesizer produces do not yet
+  account for filing-disclosed risks.
+- `run_research` always attempts filing-derived disclosed-risk analysis; there
+  is no way to opt out for a ticker where filing lookup is known to be
+  unhelpful (e.g. a company outside SEC EDGAR's coverage) other than
+  accepting the unavailable-reason report section.
+- Populating `SecurityIdentity.cik` from `resolve_cik` on the `CompanyProfile`
+  itself remains out of scope; the CIK resolved for filing lookup is used only
+  within the disclosed-risk pipeline call and is not written back to the
+  profile passed to other analysts or the report.
 - Risk Factors selection requires structural item metadata from a measured
   index shape: 10-K Item `1A` or 20-F Item `3.D`. It does not need a title such
   as `Risk Factors`, but a filing without recognized metadata, or with two
@@ -598,27 +697,32 @@ bug investigation or for validating several accumulated features.
   Disclosed Risk Analyst, reading one section directly rather than waiting on
   chunking/embeddings. Full RAG (Phase 2.5) remains for when one section at a
   time stops being enough.
-- Ticker-to-CIK resolution now exists. Does wiring the Disclosed Risk
+- ~~Ticker-to-CIK resolution now exists. Does wiring the Disclosed Risk
   Analyst (and `SecurityIdentity.cik`) into `run_research`/the CLI come next,
-  or does something else? Not selected; the roadmap does not choose this
-  automatically.
+  or does something else?~~ Decided and implemented: the Disclosed Risk
+  Analyst is wired into `run_research` via `resolve_disclosed_risk_analysis`,
+  preferring a profile-supplied CIK and falling back to `resolve_cik`.
+  `SecurityIdentity.cik` itself is still not populated from `resolve_cik` —
+  see Known Limitations.
 - Should other sections beyond Risk Factors get their own dedicated analyst
   (e.g. a Business-Description-from-filing reader), or should one analyst
   generalize across section labels? Not yet needed with one section type
   proven; premature to decide with a sample of one.
+- Should the Disclosed Risk Analyst's findings eventually feed the Research
+  Synthesizer, so the investment thesis and risk summary account for
+  filing-disclosed risks? Deliberately deferred in this slice, which only
+  renders it as an independent report section; not yet selected as the next
+  slice.
 
 ## Next Expected Steps
 
-1. Select and review the CIK policy for filing integration: whether to trust an
-   available profile CIK, resolve through SEC, or explicitly compare both.
-2. Select one bounded workflow-integration slice that fetches the latest
-   filing, sections it, selects Risk Factors, and invokes the existing analyst
-   without adding RAG or a second filing analyst.
-3. Decide its explicit failure behaviour before code: filing absence/provider
-   failure must not become an invented qualitative conclusion.
-4. Propose the implementation approach and affected files under `AGENTS.md`,
-   then implement and verify only the selected slice after approval when the
-   request is planning or review-first.
+No slice is currently selected. The Disclosed Risk Analyst is now wired into
+`run_research` and the CLI, so filing ingestion has a real consumer in the
+report. Candidates for a future slice include: feeding the Disclosed Risk
+Analyst's output into the Research Synthesizer; a second filing-derived
+analyst with its own distinct evidence boundary; caching the ticker-to-CIK
+table or retrieved documents; or non-filing roadmap work (valuation,
+persistence). The roadmap does not choose the next one automatically.
 
 ## Cross-Agent Handoff
 

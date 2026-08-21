@@ -40,14 +40,14 @@ Completed after V0:
   live fetch against SEC's real ticker file
 - [x] Deterministic selection of a unique disclosed-risk section by filing
   form item: 10-K Item 1A or 20-F Item 3.D
+- [x] Wiring the Disclosed Risk Analyst into `run_research` and the CLI,
+  including CIK policy (prefer profile CIK, fall back to `resolve_cik`) and
+  explicit unavailable-reason failure behaviour
 
-No filing capability is used by the research workflow yet — the Disclosed
-Risk Analyst is not wired into `run_research` or the CLI, and
-the workflow neither uses a profile CIK when present nor falls back to SEC
-resolution when it is missing. Ticker-to-CIK resolution exists now, so that
-wiring is no longer blocked on a missing capability, but it has not been
-selected as a slice. No implementation slice is currently active. The roadmap
-does not select or begin the next one automatically.
+The research workflow now resolves a filing-derived Disclosed Risk analysis
+for every ticker and renders it as its own report section, sourced at the
+filing-section level. No implementation slice is currently active. The
+roadmap does not select or begin the next one automatically.
 
 Live CLI runs are reserved for bug investigation or after several new features
 have accumulated. Unit, integration, lint, and type checks are the default
@@ -183,11 +183,26 @@ workflow can render that outcome as a limitation. The selector is deterministic
 and uses existing section data only; it does not retrieve filings, invoke an
 LLM, or wire filing analysis into the CLI.
 
+### Completed: wiring the Disclosed Risk Analyst into `run_research`
+
+The first slice to connect filing ingestion to the research workflow rather
+than adding another standalone capability. `resolve_disclosed_risk_analysis`
+composes CIK resolution, annual-report discovery, document retrieval,
+sectioning, and Risk Factors selection into the one path the existing
+Disclosed Risk Analyst needs, prefers a CIK the financial-data provider
+already supplied over an extra SEC request, and returns a typed unavailable
+reason for every expected evidence gap rather than failing the whole research
+run. The report gained a "Disclosed Risks" section with its sources merged
+into the consolidated source list. See `HANDOFF.md` for the CIK policy,
+failure-behaviour, and rendering details.
+
 ### Next selection: not yet chosen
 
 Introduce dedicated Market, Moat, Growth, or further Risk Analysts only when
 each has a distinct evidence boundary, responsibility, and evaluation
-criterion—not merely because multiple LLM calls are possible.
+criterion—not merely because multiple LLM calls are possible. Feeding the
+Disclosed Risk Analyst's findings into the Research Synthesizer is also a
+candidate, deliberately deferred by the wiring slice above.
 
 ### Roadmap candidate: quarterly reports (10-Q / 6-K)
 

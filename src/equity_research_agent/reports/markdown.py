@@ -2,6 +2,10 @@
 
 from decimal import Decimal
 
+from equity_research_agent.filings.disclosed_risk_pipeline import (
+    DisclosedRiskPipelineResult,
+    DisclosedRiskUnavailableReason,
+)
 from equity_research_agent.models.bear_analysis import BearAnalysis
 from equity_research_agent.models.business_analysis import BusinessAnalysis
 from equity_research_agent.models.company import CompanyProfile
@@ -10,7 +14,10 @@ from equity_research_agent.models.financial_quality import (
     FinancialQualityEvidence,
 )
 from equity_research_agent.models.metrics import FinancialMetrics
-from equity_research_agent.models.provenance import SourceReference
+from equity_research_agent.models.provenance import (
+    SourceReference,
+    merge_source_references,
+)
 from equity_research_agent.models.synthesis import ResearchSynthesis
 
 
@@ -21,8 +28,16 @@ def render_research_report(
     bear_analysis: BearAnalysis,
     financial_quality_analysis: FinancialQualityAnalysis,
     synthesis: ResearchSynthesis,
+    disclosed_risk_result: DisclosedRiskPipelineResult,
 ) -> str:
     """Render sourced analysis into deterministic, human-readable Markdown."""
+
+    report_sources = merge_source_references(
+        synthesis.sources,
+        disclosed_risk_result.analysis.sources
+        if disclosed_risk_result.analysis is not None
+        else (),
+    )
 
     lines = [
         f"# {profile.name} ({profile.security.canonical_symbol})",
@@ -135,6 +150,7 @@ def render_research_report(
         *_bullets(bear_analysis.thesis_killers),
         *_analysis_limitations(bear_analysis.limitations),
         "",
+        *_disclosed_risk_section(disclosed_risk_result),
         "## Research Synthesis (LLM Interpretation)",
         "",
         f"### Investment Thesis\n\n{synthesis.investment_thesis}",
@@ -158,7 +174,7 @@ def render_research_report(
         "",
         "## Sources",
         "",
-        *[_source_line(source) for source in synthesis.sources],
+        *[_source_line(source) for source in report_sources],
         "",
     ]
     return "\n".join(line for line in lines if line is not None)
@@ -247,6 +263,43 @@ def _risk_line(risk: str, mechanism: str, source_ids: tuple[str, ...]) -> str:
 
     citations = ", ".join(f"[{source_id}]" for source_id in source_ids)
     return f"- **{risk}** {mechanism} {citations}"
+
+
+def _disclosed_risk_section(result: DisclosedRiskPipelineResult) -> list[str]:
+    """Render the filer's own disclosed risks, or why they are unavailable."""
+
+    heading = "## Disclosed Risks (Filing Interpretation)"
+    if result.analysis is None:
+        reason = _disclosed_risk_unavailable_reason_text(result)
+        return [heading, "", f"- Not available — {reason}", ""]
+    return [
+        heading,
+        "",
+        "### Risks",
+        "",
+        *[
+            _evidence_line(risk.risk, risk.source_ids)
+            for risk in result.analysis.disclosed_risks
+        ],
+        *_analysis_limitations(result.analysis.limitations),
+        "",
+    ]
+
+
+def _disclosed_risk_unavailable_reason_text(
+    result: DisclosedRiskPipelineResult,
+) -> str:
+    """Return a readable reason for a missing disclosed-risk analysis."""
+
+    assert result.unavailable_reason is not None
+    if (
+        result.unavailable_reason
+        == DisclosedRiskUnavailableReason.RISK_FACTORS_SECTION_UNAVAILABLE
+    ):
+        assert result.risk_factors_reason is not None
+        detail = result.risk_factors_reason.value.replace("_", " ")
+        return f"risk factors section unavailable ({detail})"
+    return result.unavailable_reason.value.replace("_", " ")
 
 
 def _analysis_limitations(limitations: tuple[str, ...]) -> list[str]:
