@@ -32,6 +32,7 @@ from equity_research_agent.filings import (
 from equity_research_agent.models.bear_analysis import BearAnalysis
 from equity_research_agent.models.business_analysis import BusinessAnalysis
 from equity_research_agent.models.company import CompanyProfile
+from equity_research_agent.models.disclosed_risk_analysis import DisclosedRiskAnalysis
 from equity_research_agent.models.financial_quality import FinancialQualityAnalysis
 from equity_research_agent.models.financial_risk import FinancialRiskContext
 from equity_research_agent.models.synthesis import ResearchSynthesis
@@ -77,8 +78,9 @@ class ResearchSynthesizer(Protocol):
         business_analysis: BusinessAnalysis,
         bear_analysis: BearAnalysis,
         financial_quality_analysis: FinancialQualityAnalysis,
+        disclosed_risk_analysis: DisclosedRiskAnalysis | None,
     ) -> ResearchSynthesis:
-        """Synthesize business and bear analyses into a research summary."""
+        """Synthesize completed analyses, including filing risks when available."""
 
 
 def run_research(
@@ -114,7 +116,11 @@ def run_research(
         financial_quality_analysis, financial_risk_context
     )
     synthesis = synthesizer.analyze(
-        profile, business_analysis, bear_analysis, financial_quality_analysis
+        profile,
+        business_analysis,
+        bear_analysis,
+        financial_quality_analysis,
+        disclosed_risk_result.analysis,
     )
     return render_research_report(
         profile,

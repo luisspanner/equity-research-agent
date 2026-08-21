@@ -132,8 +132,11 @@ Disclosed Risk Analyst on it. The report includes a "Disclosed Risks" section
 sourced at the filing-section level; when any step in that chain is not
 possible (no resolvable CIK, no annual report on file, or no uniquely
 identified Risk Factors section), the report states the specific reason
-instead of silently omitting the section or failing the whole run. See
-`HANDOFF.md` for current state.
+instead of silently omitting the section or failing the whole run. When
+available, the disclosed-risk analysis also feeds the final Research
+Synthesis, so the investment thesis and risk summary can draw on
+filing-disclosed risks alongside the Business, Bear, and Financial Quality
+Analyses. See `HANDOFF.md` for current state.
 
 ## Running V0
 

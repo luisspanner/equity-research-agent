@@ -14,10 +14,7 @@ from equity_research_agent.models.financial_quality import (
     FinancialQualityEvidence,
 )
 from equity_research_agent.models.metrics import FinancialMetrics
-from equity_research_agent.models.provenance import (
-    SourceReference,
-    merge_source_references,
-)
+from equity_research_agent.models.provenance import SourceReference
 from equity_research_agent.models.synthesis import ResearchSynthesis
 
 
@@ -30,14 +27,12 @@ def render_research_report(
     synthesis: ResearchSynthesis,
     disclosed_risk_result: DisclosedRiskPipelineResult,
 ) -> str:
-    """Render sourced analysis into deterministic, human-readable Markdown."""
+    """Render sourced analysis into deterministic, human-readable Markdown.
 
-    report_sources = merge_source_references(
-        synthesis.sources,
-        disclosed_risk_result.analysis.sources
-        if disclosed_risk_result.analysis is not None
-        else (),
-    )
+    ``synthesis.sources`` already includes the disclosed-risk analysis's
+    sources when available, since the Research Synthesizer merges them
+    deterministically; this function does not merge them again.
+    """
 
     lines = [
         f"# {profile.name} ({profile.security.canonical_symbol})",
@@ -174,7 +169,7 @@ def render_research_report(
         "",
         "## Sources",
         "",
-        *[_source_line(source) for source in report_sources],
+        *[_source_line(source) for source in synthesis.sources],
         "",
     ]
     return "\n".join(line for line in lines if line is not None)

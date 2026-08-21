@@ -19,6 +19,10 @@ from equity_research_agent.models.business_analysis import (
     BusinessAnalysisEvidence,
 )
 from equity_research_agent.models.company import CompanyProfile, SecurityIdentity
+from equity_research_agent.models.disclosed_risk_analysis import (
+    DisclosedRisk,
+    DisclosedRiskAnalysis,
+)
 from equity_research_agent.models.financial_quality import (
     FinancialQualityAnalysis,
     FinancialQualityEvidence,
@@ -137,6 +141,23 @@ def make_financial_quality_analysis(
     )
 
 
+def make_disclosed_risk_analysis(
+    sources: tuple[SourceReference, ...] | None = None,
+) -> DisclosedRiskAnalysis:
+    """Create sourced prior disclosed-risk analysis for a Groq request."""
+
+    analysis_sources = sources or (make_source("TEST-filing-section"),)
+    return DisclosedRiskAnalysis(
+        disclosed_risks=(
+            DisclosedRisk(
+                risk="Export controls could restrict product sales.",
+                source_ids=(analysis_sources[0].source_id,),
+            ),
+        ),
+        sources=analysis_sources,
+    )
+
+
 def make_completion(content: object) -> bytes:
     """Create a minimal successful Groq chat-completions payload."""
 
@@ -181,6 +202,7 @@ def test_analyze_sends_json_mode_request_and_attaches_merged_sources(
         make_business_analysis(),
         make_bear_analysis(),
         make_financial_quality_analysis(),
+        None,
     )
 
     assert synthesis.sources[0].source_id == "TEST-overview"
@@ -194,6 +216,48 @@ def test_analyze_sends_json_mode_request_and_attaches_merged_sources(
     request_body = json.loads(request.data.decode("utf-8"))
     assert request_body["model"] == "openai/gpt-oss-120b"
     assert request_body["response_format"] == {"type": "json_object"}
+
+
+def test_analyze_merges_disclosed_risk_sources_when_supplied(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_urlopen(request: Request, *, timeout: float) -> FakeResponse:
+        return FakeResponse(make_completion(valid_synthesis_content()))
+
+    monkeypatch.setattr(
+        "equity_research_agent.agents.synthesis_groq.urlopen", fake_urlopen
+    )
+
+    synthesis = GroqResearchSynthesizer("test-key").analyze(
+        make_profile(),
+        make_business_analysis(),
+        make_bear_analysis(),
+        make_financial_quality_analysis(),
+        make_disclosed_risk_analysis(),
+    )
+
+    assert "TEST-filing-section" in [source.source_id for source in synthesis.sources]
+
+
+def test_analyze_rejects_conflicting_disclosed_risk_sources_before_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unexpected_urlopen(request: Request, *, timeout: float) -> FakeResponse:
+        raise AssertionError("the synthesis request must not be sent")
+
+    monkeypatch.setattr(
+        "equity_research_agent.agents.synthesis_groq.urlopen", unexpected_urlopen
+    )
+    conflicting_source = make_source("TEST-overview", provider="other_provider")
+
+    with pytest.raises(ValueError, match="conflicting source references"):
+        GroqResearchSynthesizer("test-key").analyze(
+            make_profile(),
+            make_business_analysis(),
+            make_bear_analysis(),
+            make_financial_quality_analysis(),
+            make_disclosed_risk_analysis((conflicting_source,)),
+        )
 
 
 def test_analyze_rejects_conflicting_sources_before_request(
@@ -213,6 +277,7 @@ def test_analyze_rejects_conflicting_sources_before_request(
             make_business_analysis(),
             make_bear_analysis((conflicting_source,)),
             make_financial_quality_analysis(),
+            None,
         )
 
 
@@ -233,6 +298,7 @@ def test_analyze_rejects_conflicting_financial_quality_sources_before_request(
             make_business_analysis(),
             make_bear_analysis(),
             make_financial_quality_analysis((conflicting_source,)),
+            None,
         )
 
 
@@ -274,6 +340,7 @@ def test_network_errors_are_safely_wrapped(
             make_business_analysis(),
             make_bear_analysis(),
             make_financial_quality_analysis(),
+            None,
         )
 
     assert "test-key" not in str(error.value)
@@ -304,6 +371,7 @@ def test_invalid_groq_responses_are_rejected(
             make_business_analysis(),
             make_bear_analysis(),
             make_financial_quality_analysis(),
+            None,
         )
 
 
@@ -336,4 +404,5 @@ def test_schema_invalid_response_is_rejected(monkeypatch: pytest.MonkeyPatch) ->
             make_business_analysis(),
             make_bear_analysis(),
             make_financial_quality_analysis(),
+            None,
         )

@@ -43,11 +43,15 @@ Completed after V0:
 - [x] Wiring the Disclosed Risk Analyst into `run_research` and the CLI,
   including CIK policy (prefer profile CIK, fall back to `resolve_cik`) and
   explicit unavailable-reason failure behaviour
+- [x] Feeding the disclosed-risk analysis into the Research Synthesizer as an
+  optional fourth prior analysis, alongside Business, Bear, and Financial
+  Quality
 
 The research workflow now resolves a filing-derived Disclosed Risk analysis
-for every ticker and renders it as its own report section, sourced at the
-filing-section level. No implementation slice is currently active. The
-roadmap does not select or begin the next one automatically.
+for every ticker, renders it as its own report section, and — when
+available — feeds it into the final Research Synthesis. No implementation
+slice is currently active. The roadmap does not select or begin the next one
+automatically.
 
 Live CLI runs are reserved for bug investigation or after several new features
 have accumulated. Unit, integration, lint, and type checks are the default
@@ -192,17 +196,25 @@ sectioning, and Risk Factors selection into the one path the existing
 Disclosed Risk Analyst needs, prefers a CIK the financial-data provider
 already supplied over an extra SEC request, and returns a typed unavailable
 reason for every expected evidence gap rather than failing the whole research
-run. The report gained a "Disclosed Risks" section with its sources merged
-into the consolidated source list. See `HANDOFF.md` for the CIK policy,
-failure-behaviour, and rendering details.
+run. The report gained a "Disclosed Risks" section. See `HANDOFF.md` for the
+CIK policy, failure-behaviour, and rendering details.
+
+### Completed: feeding disclosed risks into the Research Synthesizer
+
+The immediate follow-up to the wiring slice above. The Research Synthesizer
+now takes the disclosed-risk analysis as an optional fourth prior analysis,
+alongside Business, Bear, and Financial Quality, so the final investment
+thesis, risk summary, and evidence can draw on filing-disclosed risks. When
+unavailable, the Synthesizer's prompt is unchanged from before this slice.
+Source merging for the report's consolidated Sources list moved fully into
+the Synthesizer's existing deterministic merge, so the Markdown renderer no
+longer merges sources itself. See `HANDOFF.md` for details.
 
 ### Next selection: not yet chosen
 
 Introduce dedicated Market, Moat, Growth, or further Risk Analysts only when
 each has a distinct evidence boundary, responsibility, and evaluation
-criterion—not merely because multiple LLM calls are possible. Feeding the
-Disclosed Risk Analyst's findings into the Research Synthesizer is also a
-candidate, deliberately deferred by the wiring slice above.
+criterion—not merely because multiple LLM calls are possible.
 
 ### Roadmap candidate: quarterly reports (10-Q / 6-K)
 

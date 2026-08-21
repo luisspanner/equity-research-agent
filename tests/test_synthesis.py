@@ -12,6 +12,10 @@ from equity_research_agent.models.business_analysis import (
     BusinessAnalysisEvidence,
 )
 from equity_research_agent.models.company import CompanyProfile, SecurityIdentity
+from equity_research_agent.models.disclosed_risk_analysis import (
+    DisclosedRisk,
+    DisclosedRiskAnalysis,
+)
 from equity_research_agent.models.financial_quality import (
     FinancialQualityAnalysis,
     FinancialQualityEvidence,
@@ -108,12 +112,30 @@ def make_financial_quality_analysis(
     )
 
 
+def make_disclosed_risk_analysis(
+    sources: tuple[SourceReference, ...] | None = None,
+) -> DisclosedRiskAnalysis:
+    """Create sourced prior disclosed-risk analysis for synthesis tests."""
+
+    analysis_sources = sources or (make_source("TEST-filing-section"),)
+    return DisclosedRiskAnalysis(
+        disclosed_risks=(
+            DisclosedRisk(
+                risk="Export controls could restrict product sales.",
+                source_ids=(analysis_sources[0].source_id,),
+            ),
+        ),
+        sources=analysis_sources,
+    )
+
+
 def test_prompt_preserves_the_evidence_boundary_and_deduplicates_sources() -> None:
     prompt = build_research_synthesis_prompt(
         make_profile(),
         make_business_analysis(),
         make_bear_analysis(),
         make_financial_quality_analysis(),
+        None,
     )
 
     assert "Test Company" in prompt
@@ -124,6 +146,40 @@ def test_prompt_preserves_the_evidence_boundary_and_deduplicates_sources() -> No
     assert "not an investment recommendation" in prompt
     assert prompt.count('"source_id": "TEST-overview"') == 1
     assert prompt.count('"source_id": "TEST-income-statement"') == 1
+    assert "prior_disclosed_risk_analysis" not in prompt
+
+
+def test_prompt_includes_disclosed_risk_analysis_when_supplied() -> None:
+    prompt = build_research_synthesis_prompt(
+        make_profile(),
+        make_business_analysis(),
+        make_bear_analysis(),
+        make_financial_quality_analysis(),
+        make_disclosed_risk_analysis(),
+    )
+
+    assert "prior_disclosed_risk_analysis" in prompt
+    assert "Export controls could restrict product sales." in prompt
+    assert prompt.count('"source_id": "TEST-filing-section"') == 1
+
+
+def test_prompt_rejects_conflicting_disclosed_risk_sources() -> None:
+    conflicting_source = SourceReference(
+        provider="other_provider",
+        source_type="filing_section",
+        source_id="TEST-overview",
+        url=HttpUrl("https://example.com/other-overview"),
+        captured_on=date(2026, 8, 18),
+    )
+
+    with pytest.raises(ValueError, match="conflicting source references"):
+        build_research_synthesis_prompt(
+            make_profile(),
+            make_business_analysis(),
+            make_bear_analysis(),
+            make_financial_quality_analysis(),
+            make_disclosed_risk_analysis((conflicting_source,)),
+        )
 
 
 def test_prompt_rejects_conflicting_source_references() -> None:
@@ -141,6 +197,7 @@ def test_prompt_rejects_conflicting_source_references() -> None:
             make_business_analysis(),
             make_bear_analysis((conflicting_source,)),
             make_financial_quality_analysis(),
+            None,
         )
 
 
@@ -159,6 +216,7 @@ def test_prompt_rejects_conflicting_financial_quality_sources() -> None:
             make_business_analysis(),
             make_bear_analysis(),
             make_financial_quality_analysis((conflicting_source,)),
+            None,
         )
 
 

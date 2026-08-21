@@ -17,6 +17,7 @@ from equity_research_agent.agents.synthesis import build_research_synthesis_prom
 from equity_research_agent.models.bear_analysis import BearAnalysis
 from equity_research_agent.models.business_analysis import BusinessAnalysis
 from equity_research_agent.models.company import CompanyProfile
+from equity_research_agent.models.disclosed_risk_analysis import DisclosedRiskAnalysis
 from equity_research_agent.models.financial_quality import FinancialQualityAnalysis
 from equity_research_agent.models.provenance import merge_source_references
 from equity_research_agent.models.synthesis import ResearchSynthesis
@@ -58,6 +59,7 @@ class GroqResearchSynthesizer:
         business_analysis: BusinessAnalysis,
         bear_analysis: BearAnalysis,
         financial_quality_analysis: FinancialQualityAnalysis,
+        disclosed_risk_analysis: DisclosedRiskAnalysis | None,
     ) -> ResearchSynthesis:
         """Return source-validated research synthesis for one company."""
 
@@ -68,6 +70,7 @@ class GroqResearchSynthesizer:
                 business_analysis,
                 bear_analysis,
                 financial_quality_analysis,
+                disclosed_risk_analysis,
             ),
         )
         response_payload = post_json_chat_request(
@@ -90,6 +93,9 @@ class GroqResearchSynthesizer:
                 business_analysis.sources,
                 bear_analysis.sources,
                 financial_quality_analysis.sources,
+                disclosed_risk_analysis.sources
+                if disclosed_risk_analysis is not None
+                else (),
             )
         ]
         try:

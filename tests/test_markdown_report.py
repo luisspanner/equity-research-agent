@@ -310,14 +310,19 @@ def test_render_report_includes_disclosed_risks_when_available() -> None:
     assert "[0000000000-26-000000:risks]" in report
 
 
-def test_render_report_merges_disclosed_risk_sources_into_consolidated_sources() -> (
-    None
-):
+def test_render_report_sources_section_reflects_synthesis_sources_only() -> None:
+    """The Research Synthesizer merges disclosed-risk sources; rendering does not.
+
+    ``make_synthesis()`` does not include the disclosed-risk fixture's source,
+    so it must not appear in the consolidated Sources section even though the
+    Disclosed Risks section above it is available and cites it.
+    """
+
     report = render_fixture_report()
 
     sources_section = report.split("## Sources")[1]
-    assert "0000000000-26-000000:risks" in sources_section
     assert "TEST-overview" in sources_section
+    assert "0000000000-26-000000:risks" not in sources_section
 
 
 def test_render_report_states_disclosed_risk_unavailable_reason() -> None:

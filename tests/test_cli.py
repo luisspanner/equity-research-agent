@@ -7,6 +7,9 @@ import pytest
 from pydantic import HttpUrl
 
 from equity_research_agent import main, run_research
+from equity_research_agent.filings.disclosed_risk_pipeline import (
+    DisclosedRiskPipelineResult,
+)
 from equity_research_agent.models.financial_quality import (
     FinancialQualityAnalysis,
     FinancialQualityEvidence,
@@ -30,7 +33,10 @@ def test_run_research_orchestrates_the_v0_components(
     business_analysis = object()
     bear_analysis = object()
     financial_quality_analysis = object()
-    disclosed_risk_result = object()
+    disclosed_risk_analysis = object()
+    disclosed_risk_result = DisclosedRiskPipelineResult(
+        analysis=disclosed_risk_analysis
+    )
     synthesis = object()
     filing_provider = object()
     disclosed_risk_analyst = object()
@@ -77,6 +83,7 @@ def test_run_research_orchestrates_the_v0_components(
             received_business_analysis: object,
             received_bear_analysis: object,
             received_financial_quality_analysis: object,
+            received_disclosed_risk_analysis: object,
         ) -> object:
             events.append(
                 (
@@ -85,6 +92,7 @@ def test_run_research_orchestrates_the_v0_components(
                     received_business_analysis,
                     received_bear_analysis,
                     received_financial_quality_analysis,
+                    received_disclosed_risk_analysis,
                 )
             )
             return synthesis
@@ -193,6 +201,7 @@ def test_run_research_orchestrates_the_v0_components(
             business_analysis,
             bear_analysis,
             financial_quality_analysis,
+            disclosed_risk_analysis,
         ),
         (
             "report",

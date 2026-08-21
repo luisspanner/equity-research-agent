@@ -31,7 +31,16 @@ filing-side gap does not fail the whole research run; the report states the
 specific reason instead. Genuine provider or transport failures still
 propagate and fail the run, unchanged from every other provider call in the
 workflow. The Markdown report renders the result as a new "Disclosed Risks"
-section and merges its sources into the report's consolidated source list.
+section.
+
+The Research Synthesizer now consumes the disclosed-risk analysis too, when
+one is available: its investment thesis, risk summary, and evidence can draw
+on filing-disclosed risks alongside the Business, Bear, and Financial Quality
+Analyses, and its `merge_source_references` call folds the disclosed-risk
+analysis's sources into the synthesis's own `sources` field, which the report
+renders as the single consolidated Sources list. When no disclosed-risk
+analysis is available, the Synthesizer's prompt is unchanged from before this
+slice.
 
 ## Completed Filing-Ingestion Slices
 
@@ -223,12 +232,9 @@ connect filing ingestion to the research workflow and its report.
   parameter and a new "Disclosed Risks (Filing Interpretation)" section,
   placed after Bear Case. When unavailable, it renders the specific reason
   (e.g. "risk factors section unavailable (expected item not found)") instead
-  of omitting the section. When available, the analysis's sources are merged
-  into the report's consolidated Sources list via the existing
-  `merge_source_references`, computed at render time rather than by asking
-  the Research Synthesizer to know about filing evidence — the Disclosed Risk
-  Analyst is not fed into Synthesis in this slice; it renders as its own,
-  independent report section.
+  of omitting the section. This section is independent of whether Synthesis
+  used the analysis; see the immediately following slice for that wiring and
+  why the Sources list is no longer merged at render time.
 - `main()` requires a new `EDGAR_CONTACT_USER_AGENT` environment variable (the
   contact string SEC EDGAR requires, not a secret) to construct
   `EdgarFilingProvider`, alongside the existing `ALPHA_VANTAGE_API_KEY` and
@@ -241,6 +247,41 @@ connect filing ingestion to the research workflow and its report.
   parameters. No new live EDGAR fetch was needed; this slice recombines
   already-validated capabilities rather than adding new filing-structure
   handling.
+
+Feeding disclosed risks into the Research Synthesizer — the wiring slice's
+immediate follow-up, so the final report's investment thesis and risk summary
+can account for filing-disclosed risks.
+
+- `build_research_synthesis_prompt` (`agents/synthesis.py`) gained a required
+  `disclosed_risk_analysis: DisclosedRiskAnalysis | None` parameter. When
+  present, it adds a `prior_disclosed_risk_analysis` key to the prompt context
+  (dumped the same way as the other three prior analyses, sources excluded)
+  and folds its sources into the same `merge_source_references` call as the
+  other analyses. When `None` (filing-derived risks were unavailable this
+  run), the prompt is byte-for-byte what it was before this slice — no
+  mention of filing risks, no invitation for the model to reason about their
+  absence. The instruction sentence was reworded to say "when supplied" so it
+  reads correctly either way.
+- `GroqResearchSynthesizer.analyze` (`agents/synthesis_groq.py`) gained the
+  same optional parameter, passed to the prompt builder and folded into the
+  second, deterministic `merge_source_references` call that overwrites
+  whatever `sources` the model claimed — the same pattern the other three
+  analyses already used, now covering the fourth.
+- `ResearchSynthesizer` Protocol and `run_research` (`__init__.py`) pass
+  `disclosed_risk_result.analysis` — which is `None` exactly when the pipeline
+  result was unavailable — as the new argument.
+- `render_research_report`'s render-time `merge_source_references` call from
+  the wiring slice above was removed: `synthesis.sources` now already
+  includes the disclosed-risk analysis's sources when the Synthesizer used
+  one, so merging again at render time was pure duplication. The Sources
+  section reads `synthesis.sources` directly, as it did before the wiring
+  slice. The independent "Disclosed Risks" report section is unaffected by
+  this change.
+- Tested by extending `test_synthesis.py` and `test_synthesis_groq.py` with
+  present/absent cases and conflicting-source rejection for the new
+  parameter, `test_cli.py` for the extended call signature, and
+  `test_markdown_report.py` to assert the Sources section reflects
+  `synthesis.sources` only, not a render-time merge.
 
 ## Measured Filing-Structure Findings
 
@@ -385,17 +426,15 @@ of both.
 ## Current / Next Slice
 
 No implementation slice is currently active. Filing sectioning, Risk Factors
-selection, ticker-to-CIK resolution, the Disclosed Risk Analyst, and its
-wiring into `run_research`/the CLI, described in "Completed Filing-Ingestion
-Slices" above, are all implemented. Mechanism details are recorded there
-rather than repeated here, to avoid drifting out of sync with the code as it
-evolves.
+selection, ticker-to-CIK resolution, the Disclosed Risk Analyst, its wiring
+into `run_research`/the CLI, and feeding its output into the Research
+Synthesizer, described in "Completed Filing-Ingestion Slices" above, are all
+implemented. Mechanism details are recorded there rather than repeated here,
+to avoid drifting out of sync with the code as it evolves.
 
 ### Explicitly Out of Scope (carried out of the completed slices)
 
 - chunking, embeddings, retrieval, RAG, pgvector, PostgreSQL, FastAPI, Docker;
-- feeding the Disclosed Risk Analyst's output into the Research Synthesizer —
-  it renders as its own independent report section, not as synthesis input;
 - fuzzy or partial ticker matching, and caching the ticker-to-CIK table across
   calls;
 - a second filing-derived analyst, or generalizing "one section in, one
@@ -437,12 +476,20 @@ evolves.
   CIK resolution through Disclosed Risk Analyst invocation into one typed
   result; the new consumer of every other filing-ingestion slice
 - `src/equity_research_agent/__init__.py` — current workflow composition;
-  calls `resolve_disclosed_risk_analysis` and passes its result to the report
-- `src/equity_research_agent/reports/markdown.py` — renders the Disclosed
-  Risks report section and merges its sources into the consolidated list
+  calls `resolve_disclosed_risk_analysis` and passes its result to both the
+  Research Synthesizer and the report
+- `src/equity_research_agent/agents/synthesis.py` — prompt builder that now
+  optionally includes the disclosed-risk analysis and merges its sources
+- `src/equity_research_agent/agents/synthesis_groq.py` — Groq adapter for the
+  same, overwriting the model's claimed sources with the deterministic merge
+- `src/equity_research_agent/reports/markdown.py` — renders the independent
+  Disclosed Risks report section; the consolidated Sources section reads
+  `synthesis.sources` directly
 - `tests/test_disclosed_risk_pipeline.py` — fake-provider tests for every
   pipeline branch: CIK policy, each unavailable reason, transport-failure
   propagation, and the happy path
+- `tests/test_synthesis.py` and `test_synthesis_groq.py` — cover the optional
+  disclosed-risk parameter: present, absent, and conflicting-source rejection
 - `tests/` — executable behavior and established testing conventions
 - `tests/test_edgar_normalizer.py` — includes `normalize_cik_from_ticker` tests
   against a recorded, trimmed `company_tickers.json` excerpt
@@ -529,11 +576,6 @@ evolves.
   `select_risk_factors_section` already drew between missing/ambiguous
   metadata and a hard failure, now applied one level up at the pipeline that
   calls it.
-- The Disclosed Risk Analyst's output is not fed into the Research
-  Synthesizer. It renders as its own report section with its sources merged
-  into the report's consolidated list at render time, deterministically in
-  code — the Synthesizer does not need to know about filing evidence to keep
-  the report fully sourced.
 - `FilingProvider.resolve_cik` is part of the Protocol, not just the concrete
   `EdgarFilingProvider`, so workflow code can depend on the abstract provider
   type. The pipeline function still imports `EdgarNormalizationError`
@@ -541,14 +583,22 @@ evolves.
   expected "not found" from a transport failure; with only one filing
   provider implemented, this is a deliberate, minor coupling rather than a
   provider-neutral exception hierarchy that nothing yet requires.
+- The Disclosed Risk Analyst's output is fed into the Research Synthesizer as
+  an optional fourth prior analysis, following the same evidence-boundary
+  pattern (LLM interpretation, not new evidence) as Business, Bear, and
+  Financial Quality. Source merging for the final report happens once, inside
+  the Synthesizer's deterministic `merge_source_references` call, not a
+  second time at render — the Markdown renderer trusts `synthesis.sources` as
+  the complete, already-merged set rather than recomputing it.
 
 ## Verification Status
 
-Freshly verified locally on 2026-08-21 after wiring the Disclosed Risk
-Analyst into `run_research`. Risk Factors section selection is committed at
-`73e915a`; this wiring slice is committed at `aefcb43`:
+Freshly verified locally on 2026-08-21 after feeding the disclosed-risk
+analysis into the Research Synthesizer. Wiring the Disclosed Risk Analyst
+into `run_research` is committed at `aefcb43` (docs correction at `bd95807`);
+this Synthesizer-integration slice is staged locally, not yet committed:
 
-- `uv run pytest`: 555 passed
+- `uv run pytest`: 559 passed
 - `uv run ruff check`: passed
 - `uv run mypy`: passed for configured `src` (47 files)
 - `git diff --check`: passed
@@ -603,10 +653,6 @@ bug investigation or for validating several accumulated features.
 - The Disclosed Risk Analyst reads exactly one section per call. There is no
   batch entry point for many sections; wiring it into `run_research` invokes
   it once, for the one filing and one section the pipeline selects.
-- The Disclosed Risk Analyst's output is not fed into the Research
-  Synthesizer. It renders as its own report section; the investment thesis,
-  risk summary, and open questions the Synthesizer produces do not yet
-  account for filing-disclosed risks.
 - `run_research` always attempts filing-derived disclosed-risk analysis; there
   is no way to opt out for a ticker where filing lookup is known to be
   unhelpful (e.g. a company outside SEC EDGAR's coverage) other than
@@ -615,6 +661,12 @@ bug investigation or for validating several accumulated features.
   itself remains out of scope; the CIK resolved for filing lookup is used only
   within the disclosed-risk pipeline call and is not written back to the
   profile passed to other analysts or the report.
+- When disclosed-risk analysis is unavailable, the Research Synthesizer's
+  prompt says nothing about why — it is simply omitted, identical to a run
+  before this capability existed. The Synthesizer cannot distinguish "no
+  filing risks exist" from "filing lookup failed for an expected reason,"
+  though the report's separate Disclosed Risks section still states the
+  specific reason to a human reader.
 - Risk Factors selection requires structural item metadata from a measured
   index shape: 10-K Item `1A` or 20-F Item `3.D`. It does not need a title such
   as `Risk Factors`, but a filing without recognized metadata, or with two
@@ -708,21 +760,22 @@ bug investigation or for validating several accumulated features.
   (e.g. a Business-Description-from-filing reader), or should one analyst
   generalize across section labels? Not yet needed with one section type
   proven; premature to decide with a sample of one.
-- Should the Disclosed Risk Analyst's findings eventually feed the Research
+- ~~Should the Disclosed Risk Analyst's findings eventually feed the Research
   Synthesizer, so the investment thesis and risk summary account for
-  filing-disclosed risks? Deliberately deferred in this slice, which only
-  renders it as an independent report section; not yet selected as the next
-  slice.
+  filing-disclosed risks?~~ Decided and implemented: `ResearchSynthesizer`
+  takes the analysis as an optional fourth prior analysis and merges its
+  sources; the prompt is unchanged when it is unavailable.
 
 ## Next Expected Steps
 
-No slice is currently selected. The Disclosed Risk Analyst is now wired into
-`run_research` and the CLI, so filing ingestion has a real consumer in the
-report. Candidates for a future slice include: feeding the Disclosed Risk
-Analyst's output into the Research Synthesizer; a second filing-derived
-analyst with its own distinct evidence boundary; caching the ticker-to-CIK
-table or retrieved documents; or non-filing roadmap work (valuation,
-persistence). The roadmap does not choose the next one automatically.
+No slice is currently selected. The Disclosed Risk Analyst is wired into
+`run_research`, the CLI, and the Research Synthesizer, so filing ingestion now
+has a real consumer both in the report and in the final synthesis. Candidates
+for a future slice include: a second filing-derived analyst with its own
+distinct evidence boundary; caching the ticker-to-CIK table or retrieved
+documents; populating `SecurityIdentity.cik` from `resolve_cik`; or
+non-filing roadmap work (valuation, persistence). The roadmap does not choose
+the next one automatically.
 
 ## Cross-Agent Handoff
 
